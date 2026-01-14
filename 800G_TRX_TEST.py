@@ -29,7 +29,10 @@ TEST_ITEM_HEADER = "測試項目"
 CH_NUMBER_HEADER = "CHNumber"
 COMPONENT_ID_HEADER = "COMPONENTID"
 DATA_ANALYSIS_SHEET = "Data Analysis"
+ERROR_CODE_SHEET = "Error Code"
 FUNCTION_TEMPLATE = "Function.xlsx"
+ERROR_CODE_HEADER = "Error code"
+FAILURE_CODE_HEADER = "FailureCodeID"
 STATION_ORDER = [
     "DDMI",
     "RT",
@@ -163,6 +166,19 @@ def find_component_column(columns: list[str]) -> str:
     return column
 
 
+def find_failure_code_column(columns: list[str]) -> str | None:
+    return find_column(
+        columns,
+        [
+            FAILURE_CODE_HEADER.lower(),
+            "failure_code_id",
+            "failure_code",
+            "failurecodeid",
+            "failurecode",
+        ],
+    )
+
+
 def find_station_column(columns: list[str]) -> str | None:
     return find_column(columns, ["station", "teststation", "test_station"])
 
@@ -242,6 +258,17 @@ def determine_sort_columns(df: pd.DataFrame) -> list[str]:
     return columns if columns else []
 
 
+def normalize_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def has_value(value: object) -> bool:
+    text = normalize_text(value)
+    return text not in {"", "nan", "none", "null"}
+
+
 def split_into_tests(group_df: pd.DataFrame, expected_count: int, sort_columns: list[str]) -> list[pd.DataFrame]:
     if sort_columns:
         group_df = group_df.sort_values(sort_columns)
@@ -252,6 +279,70 @@ def split_into_tests(group_df: pd.DataFrame, expected_count: int, sort_columns: 
     for start in range(0, total_rows, expected_count):
         tests.append(group_df.iloc[start : start + expected_count])
     return tests
+
+
+def load_error_code_mapping(workbook: Workbook) -> list[tuple[str, str]]:
+    if ERROR_CODE_SHEET not in workbook.sheetnames:
+        return []
+    ws = workbook[ERROR_CODE_SHEET]
+    mapping: list[tuple[str, str]] = []
+    for error_code, failure_code in ws.iter_rows(min_row=2, max_col=2, values_only=True):
+        if not error_code or not failure_code:
+            continue
+        mapping.append((normalize_text(error_code), normalize_text(failure_code)))
+    return mapping
+
+
+def match_error_code(value: object, mapping: list[tuple[str, str]]) -> str:
+    text = normalize_text(value).lower()
+    if not text:
+        return ""
+    for error_code, pattern in mapping:
+        pattern_text = pattern.lower()
+        if pattern_text in text or text in pattern_text:
+            return error_code
+    return ""
+
+
+def build_component_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]) -> dict[str, str]:
+    if not mapping:
+        return {}
+    component_column = find_component_column(list(df.columns))
+    failure_code_column = find_failure_code_column(list(df.columns))
+    if not failure_code_column:
+        print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
+        return {}
+
+    target_categories = {"ATS", "DDMI", "RT", "LT", "HT"}
+    if "_category" in df.columns:
+        source_df = df[df["_category"].isin(target_categories)]
+    else:
+        source_df = df
+
+    error_codes: dict[str, str] = {}
+    for component_id, group in source_df.groupby(component_column):
+        failure_values = [value for value in group[failure_code_column] if has_value(value)]
+        if not failure_values:
+            continue
+        selected_code = ""
+        for value in failure_values:
+            selected_code = match_error_code(value, mapping)
+            if selected_code:
+                break
+        if selected_code:
+            error_codes[component_id] = selected_code
+    return error_codes
+
+
+def apply_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]) -> pd.DataFrame:
+    if df.empty:
+        df[ERROR_CODE_HEADER] = ""
+        return df
+    component_column = find_component_column(list(df.columns))
+    error_code_map = build_component_error_codes(df, mapping)
+    df = df.copy()
+    df[ERROR_CODE_HEADER] = df[component_column].map(error_code_map).fillna("")
+    return df
 
 
 def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]:
@@ -435,10 +526,11 @@ def main():
 
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
+            workbook = load_output_workbook(base_dir)
+            error_code_mapping = load_error_code_mapping(workbook)
+            df = apply_error_codes(df, error_code_mapping)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
-
-            workbook = load_output_workbook(base_dir)
             for category in categories:
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
