@@ -281,45 +281,27 @@ def split_into_tests(group_df: pd.DataFrame, expected_count: int, sort_columns: 
     return tests
 
 
-def load_error_code_mapping(workbook: Workbook) -> list[tuple[str, str]]:
-    if ERROR_CODE_SHEET not in workbook.sheetnames:
-        return []
-    ws = workbook[ERROR_CODE_SHEET]
-    mapping: list[tuple[str, str]] = []
-    for error_code, failure_code in ws.iter_rows(min_row=2, max_col=2, values_only=True):
-        if not error_code or not failure_code:
-            continue
-        mapping.append((normalize_text(error_code), normalize_text(failure_code)))
-    return mapping
-
-
-def match_error_code(value: object, mapping: list[tuple[str, str]]) -> str:
+def extract_error_code(value: object) -> str:
     text = normalize_text(value)
     if not text:
         return ""
-
+    if text.lower() in {"0", "0.0"}:
+        return ""
     prefix = text.split(":", 1)[0].strip()
-    if prefix:
-        for error_code, _ in mapping:
-            if error_code.lower() == prefix.lower():
-                return error_code
-        return prefix
-
-    lowered = text.lower()
-    for error_code, pattern in mapping:
-        pattern_text = pattern.lower()
-        if pattern_text in lowered or lowered in pattern_text:
-            return error_code
-    return ""
+    if not prefix:
+        return ""
+    return prefix.split(" ", 1)[0].strip()
 
 
-def build_component_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]) -> dict[str, str]:
-    if not mapping:
-        return {}
+def build_component_error_codes(df: pd.DataFrame) -> dict[str, str]:
     component_column = find_component_column(list(df.columns))
     failure_code_column = find_failure_code_column(list(df.columns))
     if not failure_code_column:
         print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
+        return {}
+    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Error code 將為空白")
         return {}
 
     target_categories = {"ATS", "DDMI", "RT", "LT", "HT"}
@@ -328,14 +310,22 @@ def build_component_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]
     else:
         source_df = df
 
+    sort_columns = determine_sort_columns(source_df)
     error_codes: dict[str, str] = {}
     for component_id, group in source_df.groupby(component_column):
-        failure_values = [value for value in group[failure_code_column] if has_value(value)]
-        if not failure_values:
-            continue
+        if sort_columns:
+            group = group.sort_values(sort_columns)
         selected_code = ""
-        for value in failure_values:
-            selected_code = match_error_code(value, mapping)
+        for _, row in group.iterrows():
+            if not any(
+                not is_pass(row.get(column))
+                for column in ch_pass_fail_columns
+            ):
+                continue
+            failure_value = row.get(failure_code_column)
+            if not has_value(failure_value):
+                continue
+            selected_code = extract_error_code(failure_value)
             if selected_code:
                 break
         if selected_code:
@@ -343,12 +333,12 @@ def build_component_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]
     return error_codes
 
 
-def apply_error_codes(df: pd.DataFrame, mapping: list[tuple[str, str]]) -> pd.DataFrame:
+def apply_error_codes(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         df[ERROR_CODE_HEADER] = ""
         return df
     component_column = find_component_column(list(df.columns))
-    error_code_map = build_component_error_codes(df, mapping)
+    error_code_map = build_component_error_codes(df)
     df = df.copy()
     df[ERROR_CODE_HEADER] = df[component_column].map(error_code_map).fillna("")
     return df
@@ -536,8 +526,7 @@ def main():
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
-            error_code_mapping = load_error_code_mapping(workbook)
-            df = apply_error_codes(df, error_code_mapping)
+            df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
             for category in categories:
