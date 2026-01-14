@@ -22,8 +22,9 @@ PREVIEW_N = 20
 # 匯出用（先小量，確定 OK 再加大）
 EXPORT_N = 2000
 
-OUTPUT_CSV = "raw_from_sql.csv"
+OUTPUT_EXTENSION = ".xlsx"
 TEST_ITEM_HEADER = "測試項目"
+CH_NUMBER_HEADER = "CHNumber"
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,12 +96,40 @@ def apply_header(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def format_date_range(start_date: str, end_date: str) -> str:
+    if start_date == end_date:
+        return start_date
+    return f"{start_date}_{end_date}"
+
+
+def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
+    base_name = os.path.splitext(os.path.basename(__file__))[0]
+    date_range = format_date_range(start_date, end_date)
+    filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
+    return os.path.join(base_dir, filename)
+
+
+def classify_ch_number(value: str) -> str:
+    text = str(value) if value is not None else ""
+    if "ATS" in text:
+        return "ATS"
+    if "DDMI" in text:
+        return "DDMI"
+    if "TP2TP3_LT" in text or "_LT" in text:
+        return "LT"
+    if "TP2TP3_HT" in text or "_HT" in text:
+        return "HT"
+    if "TP2TP3_RT" in text or "_RT" in text:
+        return "RT"
+    return "其他"
+
+
 def main():
     args = parse_args()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(base_dir, OUTPUT_CSV)
+    out_path = build_output_path(base_dir, args.start_date, args.end_date)
 
     try:
         print(f"🚀 連線 DB：{DATABASE}")
@@ -112,33 +141,37 @@ def main():
             cols = [d[0] for d in cur.description]
             print(f"✅ 欄位數：{len(cols)}（已連到該報表 view）")
 
-            # 2) 預覽資料（讓你實際「看到資料」）
-            preview_sql = build_sorted_query(PREVIEW_N)
-            print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")
-            t0 = time.time()
-            df_preview = pd.read_sql_query(
-                preview_sql,
-                conn,
-                params=[args.start_date, args.end_date],
-            )
-            df_preview = apply_header(df_preview)
-            print(f"✅ preview rows={len(df_preview)} time={time.time()-t0:.1f}s")
-            with pd.option_context("display.max_columns", 20, "display.width", 180):
-                print(df_preview.head(min(PREVIEW_N, 5)))
-
-            # 3) 匯出 CSV（先小量）
+            # 2) 匯出資料（先小量）
             export_sql = build_sorted_query(EXPORT_N)
-            print(f"\n📤 匯出 TOP {EXPORT_N} 到 CSV：{OUTPUT_CSV}")
-            t1 = time.time()
+            print(f"\n📤 匯出 TOP {EXPORT_N} 到 Excel：{out_path}")
+            t0 = time.time()
             df = pd.read_sql_query(
                 export_sql,
                 conn,
                 params=[args.start_date, args.end_date],
             )
             df = apply_header(df)
-            df.to_csv(out_path, index=False, encoding="utf-8-sig")
-            print(f"✅ export rows={len(df)} time={time.time()-t1:.1f}s")
-            print("📁 CSV 已輸出：", out_path)
+            print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
+            if PREVIEW_N > 0:
+                print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")
+                with pd.option_context("display.max_columns", 20, "display.width", 180):
+                    print(df.head(min(PREVIEW_N, 5)))
+
+            if CH_NUMBER_HEADER not in df.columns:
+                raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
+
+            categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
+            df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
+
+            with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+                for category in categories:
+                    sheet_df = df[df["_category"] == category].drop(columns=["_category"])
+                    sheet_name = category
+                    if sheet_df.empty:
+                        sheet_df = df.head(0).drop(columns=["_category"])
+                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            print("📁 Excel 已輸出：", out_path)
 
     except Exception as e:
         print("❌ 查詢或匯出失敗：")
