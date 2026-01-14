@@ -182,6 +182,10 @@ def find_result_column(columns: list[str]) -> str | None:
     )
 
 
+def find_ch_pass_fail_columns(columns: list[str]) -> list[str]:
+    return [col for col in columns if "ch_pass_fail" in col.lower()]
+
+
 def normalize_station(text: str) -> str | None:
     if not text:
         return None
@@ -299,6 +303,40 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     return metrics
 
 
+def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
+    component_column = find_component_column(list(df.columns))
+    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
+
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Failed Device sheet 將為空")
+        return df.head(0).drop(columns=["_category"], errors="ignore")
+
+    sort_columns = determine_sort_columns(df)
+    failed_tests: list[pd.DataFrame] = []
+
+    for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+        category_df = df[df["_category"] == category]
+        if category_df.empty:
+            continue
+        expected_count = 24 if category == "ATS" else 8
+        for _, group in category_df.groupby(component_column):
+            tests = split_into_tests(group, expected_count, sort_columns)
+            for test_df in tests:
+                if any(
+                    not is_pass(value)
+                    for column in ch_pass_fail_columns
+                    for value in test_df[column]
+                ):
+                    failed_tests.append(test_df)
+
+    if failed_tests:
+        failed_df = pd.concat(failed_tests, ignore_index=True)
+    else:
+        failed_df = df.head(0)
+
+    return failed_df.drop(columns=["_category"], errors="ignore")
+
+
 def load_output_workbook(base_dir: str) -> Workbook:
     template_path = os.path.join(base_dir, FUNCTION_TEMPLATE)
     if os.path.exists(template_path):
@@ -398,6 +436,7 @@ def main():
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             metrics = build_data_analysis_metrics(df)
+            failed_devices = build_failed_devices(df)
 
             workbook = load_output_workbook(base_dir)
             for category in categories:
@@ -406,6 +445,7 @@ def main():
                     sheet_df = df.head(0).drop(columns=["_category"])
                 write_dataframe_to_sheet(workbook, category, sheet_df)
 
+            write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
             populate_data_analysis_sheet(workbook, metrics)
             workbook.save(out_path)
 
