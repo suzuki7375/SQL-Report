@@ -505,8 +505,12 @@ def build_pareto_table(
         .reset_index()
         .rename(columns={"index": "Error Code", "error_code": "Fail Q'ty"})
     )
+    counts["Fail Q'ty"] = pd.to_numeric(counts["Fail Q'ty"], errors="coerce").fillna(0)
+    output_total_value = pd.to_numeric(output_total, errors="coerce")
+    if pd.isna(output_total_value):
+        output_total_value = 0
     counts["Ouput"] = output_total
-    counts["Failed Rate"] = counts["Fail Q'ty"] / output_total if output_total else 0
+    counts["Failed Rate"] = counts["Fail Q'ty"] / output_total_value if output_total_value else 0
     total_fail = counts["Fail Q'ty"].sum()
     counts["Cum%"] = counts["Fail Q'ty"].cumsum() / total_fail if total_fail else 0
     return counts[["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"]]
