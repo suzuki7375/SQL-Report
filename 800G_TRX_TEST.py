@@ -33,6 +33,7 @@ ERROR_CODE_SHEET = "Error Code"
 FUNCTION_TEMPLATE = "Function.xlsx"
 ERROR_CODE_HEADER = "Error code"
 FAILURE_CODE_HEADER = "FailureCodeID"
+PARETO_COLUMNS = ["Error Code", "Fail Q'ty", "Failed Rate", "Cum%"]
 STATION_ORDER = [
     "DDMI",
     "RT",
@@ -487,17 +488,17 @@ def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFra
 def build_pareto_table(
     failed_components: pd.DataFrame,
     station: str,
-    output_total: float,
+    input_total: float,
 ) -> pd.DataFrame:
     if failed_components.empty:
-        return pd.DataFrame(columns=["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"])
+        return pd.DataFrame(columns=PARETO_COLUMNS)
 
     station_df = failed_components[
         (failed_components["category"] == station)
         & (failed_components["error_code"].str.strip() != "")
     ]
     if station_df.empty:
-        return pd.DataFrame(columns=["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"])
+        return pd.DataFrame(columns=PARETO_COLUMNS)
 
     counts = (
         station_df["error_code"]
@@ -511,14 +512,13 @@ def build_pareto_table(
         count_col = "count" if "count" in counts.columns else counts.columns[1]
         counts = counts.rename(columns={value_col: "Error Code", count_col: "Fail Q'ty"})
     counts["Fail Q'ty"] = pd.to_numeric(counts["Fail Q'ty"], errors="coerce").fillna(0)
-    output_total_value = pd.to_numeric(output_total, errors="coerce")
-    if pd.isna(output_total_value):
-        output_total_value = 0
-    counts["Ouput"] = output_total
-    counts["Failed Rate"] = counts["Fail Q'ty"] / output_total_value if output_total_value else 0
+    input_total_value = pd.to_numeric(input_total, errors="coerce")
+    if pd.isna(input_total_value):
+        input_total_value = 0
+    counts["Failed Rate"] = counts["Fail Q'ty"] / input_total_value if input_total_value else 0
     total_fail = counts["Fail Q'ty"].sum()
     counts["Cum%"] = counts["Fail Q'ty"].cumsum() / total_fail if total_fail else 0
-    return counts[["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"]]
+    return counts[PARETO_COLUMNS]
 
 
 def write_pareto_table(
@@ -536,7 +536,6 @@ def write_pareto_table(
         ws.cell(row=idx, column=2, value=row[1])
         ws.cell(row=idx, column=3, value=row[2])
         ws.cell(row=idx, column=4, value=row[3])
-        ws.cell(row=idx, column=5, value=row[4])
 
 
 def populate_data_analysis_sheet(
@@ -583,9 +582,23 @@ def populate_data_analysis_sheet(
         ws[f"C{row}"] = data.get("retest_output", 0)
         ws[f"D{row}"] = data.get("retest_rate", 0)
 
-    rt_output = metrics.get("RT", {}).get("fpy_output", 0)
-    rt_pareto = build_pareto_table(failed_components, "RT", rt_output)
-    write_pareto_table(ws, start_row=43, table=rt_pareto, clear_until_row=56)
+    pareto_configs = [
+        ("DDMI", 28, 41),
+        ("RT", 43, 56),
+        ("LT", 58, 71),
+        ("HT", 73, 86),
+        ("ATS", 88, 100),
+    ]
+
+    for station, start_row, clear_until_row in pareto_configs:
+        input_total = metrics.get(station, {}).get("fpy_input", 0)
+        pareto_table = build_pareto_table(failed_components, station, input_total)
+        write_pareto_table(
+            ws,
+            start_row=start_row,
+            table=pareto_table,
+            clear_until_row=clear_until_row,
+        )
 
 
 def main():
