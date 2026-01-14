@@ -5,6 +5,7 @@ import os
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
@@ -146,6 +147,17 @@ def classify_ch_number(value: str) -> str:
     return "其他"
 
 
+def classify_ch_number_series(series: pd.Series) -> pd.Series:
+    text = series.fillna("").astype(str).str.upper()
+    result = pd.Series("其他", index=series.index, dtype="object")
+    result = result.mask(text.str.contains("ATS"), "ATS")
+    result = result.mask(text.str.contains("DDMI"), "DDMI")
+    result = result.mask(text.str.contains("TP2TP3_LT") | text.str.contains("_LT"), "LT")
+    result = result.mask(text.str.contains("TP2TP3_HT") | text.str.contains("_HT"), "HT")
+    result = result.mask(text.str.contains("TP2TP3_RT") | text.str.contains("_RT"), "RT")
+    return result
+
+
 def find_column(columns: list[str], candidates: list[str]) -> str | None:
     lowered = {col.lower(): col for col in columns}
     for name in candidates:
@@ -228,6 +240,50 @@ def normalize_station(text: str) -> str | None:
     if "TP2TP3_RT" in upper or "_RT" in upper or upper.endswith("RT") or upper.startswith("RT"):
         return "RT"
     return None
+
+
+def normalize_station_series(series: pd.Series) -> pd.Series:
+    upper = series.fillna("").astype(str).str.upper()
+    conditions = [
+        upper.str.contains("DDMI"),
+        upper.str.contains("3T") & upper.str.contains("BER"),
+        upper.str.contains("TC") & upper.str.contains("BER"),
+        upper.str.contains("ATS"),
+        upper.str.contains("BURN"),
+        upper.str.contains("SWITCH"),
+        upper.str.contains("TP2TP3_LT")
+        | upper.str.contains("_LT")
+        | upper.str.endswith("LT")
+        | upper.str.startswith("LT"),
+        upper.str.contains("TP2TP3_HT")
+        | upper.str.contains("_HT")
+        | upper.str.endswith("HT")
+        | upper.str.startswith("HT"),
+        upper.str.contains("TP2TP3_RT")
+        | upper.str.contains("_RT")
+        | upper.str.endswith("RT")
+        | upper.str.startswith("RT"),
+    ]
+    choices = [
+        "DDMI",
+        "3T BER",
+        "TC BER",
+        "ATS",
+        "Burn In",
+        "Switch",
+        "LT",
+        "HT",
+        "RT",
+    ]
+    return pd.Series(np.select(conditions, choices, default=None), index=series.index, dtype="object")
+
+
+def build_station_series(df: pd.DataFrame, station_column: str | None) -> pd.Series:
+    if station_column and station_column in df.columns:
+        station_series = normalize_station_series(df[station_column])
+        fallback_series = normalize_station_series(df[CH_NUMBER_HEADER])
+        return station_series.fillna(fallback_series)
+    return normalize_station_series(df[CH_NUMBER_HEADER])
 
 
 def determine_station(row: pd.Series, station_column: str | None) -> str | None:
@@ -353,7 +409,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     station_column = find_station_column(list(df.columns))
 
     df = df.copy()
-    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
+    df["_station"] = build_station_series(df, station_column)
     df = df[df["_station"].isin(STATION_ORDER)]
 
     if not result_column:
@@ -651,7 +707,7 @@ def main():
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
-            df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
+            df["_category"] = classify_ch_number_series(df[CH_NUMBER_HEADER])
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
