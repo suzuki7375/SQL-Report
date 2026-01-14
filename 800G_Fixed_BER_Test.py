@@ -707,7 +707,7 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["ATS", "DDMI", "LT", "HT", "RT", "3T_BER", "其他"]
+            categories = ["3T_BER", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
