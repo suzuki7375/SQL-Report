@@ -10,7 +10,9 @@ from tkinter import ttk
 
 
 SCRIPT_NAME = "800G_TRX_TEST.py"
+FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
+FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
 
 
@@ -191,12 +193,12 @@ def build_ui() -> tk.Tk:
         running_process = None
         set_loading(False)
 
-    def run_trx_test() -> None:
+    def run_report(script_name: str) -> None:
         nonlocal running_process
         if running_process is not None:
             return
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(base_dir, SCRIPT_NAME)
+        script_path = os.path.join(base_dir, script_name)
         running_process = subprocess.Popen(
             [
                 sys.executable,
@@ -211,6 +213,12 @@ def build_ui() -> tk.Tk:
         set_loading(True)
         check_process()
 
+    def run_trx_test() -> None:
+        run_report(SCRIPT_NAME)
+
+    def run_fixed_ber_test() -> None:
+        run_report(FIXED_BER_SCRIPT_NAME)
+
     main_button = ttk.Button(
         buttons_frame,
         text=BUTTON_LABEL,
@@ -220,7 +228,16 @@ def build_ui() -> tk.Tk:
     main_button.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
     button_refs.append(main_button)
 
-    for index in range(1, BUTTON_COUNT):
+    fixed_ber_button = ttk.Button(
+        buttons_frame,
+        text=FIXED_BER_BUTTON_LABEL,
+        command=run_fixed_ber_test,
+        style="Primary.TButton",
+    )
+    fixed_ber_button.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    button_refs.append(fixed_ber_button)
+
+    for index in range(2, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
