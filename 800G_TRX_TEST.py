@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import argparse
 import os
 import sys
 import time
+
 import pandas as pd
 import pyodbc
 
@@ -21,6 +23,14 @@ PREVIEW_N = 20
 EXPORT_N = 2000
 
 OUTPUT_CSV = "raw_from_sql.csv"
+TEST_ITEM_HEADER = "測試項目"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
+    parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
+    return parser.parse_args()
 
 
 def conn_str_no_db() -> str:
@@ -53,7 +63,40 @@ def test_login() -> None:
     conn.close()
 
 
+def build_sorted_query(limit: int) -> str:
+    return f"""
+WITH base AS (
+    SELECT *,
+        TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) AS test_date,
+        DATETIMEFROMPARTS(
+            TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
+            TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
+            TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
+            TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
+            TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
+            0,
+            0
+        ) AS test_datetime
+    FROM {TARGET_OBJECT}
+)
+SELECT TOP {limit} *
+FROM base
+WHERE test_date BETWEEN ? AND ?
+ORDER BY test_datetime;
+""".strip()
+
+
+def apply_header(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    columns = list(df.columns)
+    columns[0] = TEST_ITEM_HEADER
+    df.columns = columns
+    return df
+
+
 def main():
+    args = parse_args()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,19 +113,29 @@ def main():
             print(f"✅ 欄位數：{len(cols)}（已連到該報表 view）")
 
             # 2) 預覽資料（讓你實際「看到資料」）
-            preview_sql = f"SELECT TOP {PREVIEW_N} * FROM {TARGET_OBJECT};"
+            preview_sql = build_sorted_query(PREVIEW_N)
             print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")
             t0 = time.time()
-            df_preview = pd.read_sql_query(preview_sql, conn)
+            df_preview = pd.read_sql_query(
+                preview_sql,
+                conn,
+                params=[args.start_date, args.end_date],
+            )
+            df_preview = apply_header(df_preview)
             print(f"✅ preview rows={len(df_preview)} time={time.time()-t0:.1f}s")
             with pd.option_context("display.max_columns", 20, "display.width", 180):
                 print(df_preview.head(min(PREVIEW_N, 5)))
 
             # 3) 匯出 CSV（先小量）
-            export_sql = f"SELECT TOP {EXPORT_N} * FROM {TARGET_OBJECT};"
+            export_sql = build_sorted_query(EXPORT_N)
             print(f"\n📤 匯出 TOP {EXPORT_N} 到 CSV：{OUTPUT_CSV}")
             t1 = time.time()
-            df = pd.read_sql_query(export_sql, conn)
+            df = pd.read_sql_query(
+                export_sql,
+                conn,
+                params=[args.start_date, args.end_date],
+            )
+            df = apply_header(df)
             df.to_csv(out_path, index=False, encoding="utf-8-sig")
             print(f"✅ export rows={len(df)} time={time.time()-t1:.1f}s")
             print("📁 CSV 已輸出：", out_path)
