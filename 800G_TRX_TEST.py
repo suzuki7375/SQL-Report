@@ -21,8 +21,8 @@ TARGET_OBJECT = "[工八_PEREADONLY].[LK2MES-DB-REAL].[dbo].[V_PE_PRD_TestResult
 # 先看資料用
 PREVIEW_N = 20
 
-# 匯出用（先小量，確定 OK 再加大）
-EXPORT_N = 2000
+# 匯出用（None 代表不限制）
+EXPORT_N = None
 
 OUTPUT_EXTENSION = ".xlsx"
 TEST_ITEM_HEADER = "測試項目"
@@ -84,7 +84,8 @@ def test_login() -> None:
     conn.close()
 
 
-def build_sorted_query(limit: int) -> str:
+def build_sorted_query(limit: int | None) -> str:
+    top_clause = f"TOP {limit} " if limit else ""
     return f"""
 WITH base AS (
     SELECT *,
@@ -100,7 +101,7 @@ WITH base AS (
         ) AS test_datetime
     FROM {TARGET_OBJECT}
 )
-SELECT TOP {limit} *
+SELECT {top_clause}*
 FROM base
 WHERE test_date BETWEEN ? AND ?
 ORDER BY test_datetime;
@@ -618,7 +619,8 @@ def main():
 
             # 2) 匯出資料（先小量）
             export_sql = build_sorted_query(EXPORT_N)
-            print(f"\n📤 匯出 TOP {EXPORT_N} 到 Excel：{out_path}")
+            export_hint = f"TOP {EXPORT_N}" if EXPORT_N else "全部"
+            print(f"\n📤 匯出 {export_hint} 到 Excel：{out_path}")
             t0 = time.time()
             df = pd.read_sql_query(
                 export_sql,
