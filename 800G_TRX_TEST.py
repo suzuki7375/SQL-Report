@@ -427,6 +427,44 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     return failed_df.drop(columns=["_category"], errors="ignore")
 
 
+def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
+    component_column = find_component_column(list(df.columns))
+    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
+
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Pareto 統計將為空")
+        return pd.DataFrame(columns=["category", "component_id", "error_code"])
+
+    sort_columns = determine_sort_columns(df)
+    records: list[dict[str, str]] = []
+
+    for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+        category_df = df[df["_category"] == category]
+        if category_df.empty:
+            continue
+        expected_count = 24 if category == "ATS" else 8
+        for component_id, group in category_df.groupby(component_column):
+            tests = split_into_tests(group, expected_count, sort_columns)
+            for test_df in tests:
+                if any(
+                    not is_pass(value)
+                    for column in ch_pass_fail_columns
+                    for value in test_df[column]
+                ):
+                    error_code = ""
+                    if ERROR_CODE_HEADER in test_df.columns:
+                        error_code = normalize_text(test_df[ERROR_CODE_HEADER].iloc[0])
+                    records.append(
+                        {
+                            "category": category,
+                            "component_id": str(component_id),
+                            "error_code": error_code,
+                        }
+                    )
+
+    return pd.DataFrame(records, columns=["category", "component_id", "error_code"])
+
+
 def load_output_workbook(base_dir: str) -> Workbook:
     template_path = os.path.join(base_dir, FUNCTION_TEMPLATE)
     if os.path.exists(template_path):
@@ -446,7 +484,57 @@ def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFra
         ws.append(row)
 
 
-def populate_data_analysis_sheet(workbook: Workbook, metrics: dict[str, dict[str, float]]) -> None:
+def build_pareto_table(
+    failed_components: pd.DataFrame,
+    station: str,
+    output_total: float,
+) -> pd.DataFrame:
+    if failed_components.empty:
+        return pd.DataFrame(columns=["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"])
+
+    station_df = failed_components[
+        (failed_components["category"] == station)
+        & (failed_components["error_code"].str.strip() != "")
+    ]
+    if station_df.empty:
+        return pd.DataFrame(columns=["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"])
+
+    counts = (
+        station_df["error_code"]
+        .value_counts()
+        .reset_index()
+        .rename(columns={"index": "Error Code", "error_code": "Fail Q'ty"})
+    )
+    counts["Ouput"] = output_total
+    counts["Failed Rate"] = counts["Fail Q'ty"] / output_total if output_total else 0
+    total_fail = counts["Fail Q'ty"].sum()
+    counts["Cum%"] = counts["Fail Q'ty"].cumsum() / total_fail if total_fail else 0
+    return counts[["Error Code", "Fail Q'ty", "Ouput", "Failed Rate", "Cum%"]]
+
+
+def write_pareto_table(
+    ws,
+    start_row: int,
+    table: pd.DataFrame,
+    clear_until_row: int,
+) -> None:
+    for row in range(start_row + 1, clear_until_row + 1):
+        for col in range(1, 6):
+            ws.cell(row=row, column=col, value=None)
+
+    for idx, row in enumerate(table.itertuples(index=False), start=start_row + 1):
+        ws.cell(row=idx, column=1, value=row[0])
+        ws.cell(row=idx, column=2, value=row[1])
+        ws.cell(row=idx, column=3, value=row[2])
+        ws.cell(row=idx, column=4, value=row[3])
+        ws.cell(row=idx, column=5, value=row[4])
+
+
+def populate_data_analysis_sheet(
+    workbook: Workbook,
+    metrics: dict[str, dict[str, float]],
+    failed_components: pd.DataFrame,
+) -> None:
     if DATA_ANALYSIS_SHEET not in workbook.sheetnames:
         workbook.create_sheet(DATA_ANALYSIS_SHEET)
     ws = workbook[DATA_ANALYSIS_SHEET]
@@ -485,6 +573,10 @@ def populate_data_analysis_sheet(workbook: Workbook, metrics: dict[str, dict[str
         ws[f"B{row}"] = data.get("retest_input", 0)
         ws[f"C{row}"] = data.get("retest_output", 0)
         ws[f"D{row}"] = data.get("retest_rate", 0)
+
+    rt_output = metrics.get("RT", {}).get("fpy_output", 0)
+    rt_pareto = build_pareto_table(failed_components, "RT", rt_output)
+    write_pareto_table(ws, start_row=43, table=rt_pareto, clear_until_row=56)
 
 
 def main():
@@ -529,6 +621,7 @@ def main():
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
+            failed_components = build_failed_component_records(df)
             for category in categories:
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
@@ -536,7 +629,7 @@ def main():
                 write_dataframe_to_sheet(workbook, category, sheet_df)
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
-            populate_data_analysis_sheet(workbook, metrics)
+            populate_data_analysis_sheet(workbook, metrics, failed_components)
             workbook.save(out_path)
 
             print("📁 Excel 已輸出：", out_path)
