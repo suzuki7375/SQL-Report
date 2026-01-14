@@ -7,6 +7,8 @@ import time
 
 import pandas as pd
 import pyodbc
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 SERVER = "omddb"
 USERNAME = "PE_ReadOnlyUser"
@@ -25,6 +27,20 @@ EXPORT_N = 2000
 OUTPUT_EXTENSION = ".xlsx"
 TEST_ITEM_HEADER = "測試項目"
 CH_NUMBER_HEADER = "CHNumber"
+COMPONENT_ID_HEADER = "COMPONENTID"
+DATA_ANALYSIS_SHEET = "Data Analysis"
+FUNCTION_TEMPLATE = "Function.xlsx"
+STATION_ORDER = [
+    "DDMI",
+    "RT",
+    "LT",
+    "HT",
+    "Burn In",
+    "3T BER",
+    "TC BER",
+    "Final",
+    "Switch",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,6 +140,225 @@ def classify_ch_number(value: str) -> str:
     return "其他"
 
 
+def find_column(columns: list[str], candidates: list[str]) -> str | None:
+    lowered = {col.lower(): col for col in columns}
+    for name in candidates:
+        match = lowered.get(name.lower())
+        if match:
+            return match
+    for col in columns:
+        lowered_col = col.lower()
+        if any(token in lowered_col for token in candidates):
+            return col
+    return None
+
+
+def find_component_column(columns: list[str]) -> str:
+    column = find_column(
+        columns,
+        [COMPONENT_ID_HEADER.lower(), "component_id", "component"],
+    )
+    if not column:
+        raise KeyError(f"查無欄位 {COMPONENT_ID_HEADER}")
+    return column
+
+
+def find_station_column(columns: list[str]) -> str | None:
+    return find_column(columns, ["station", "teststation", "test_station"])
+
+
+def find_result_column(columns: list[str]) -> str | None:
+    return find_column(
+        columns,
+        [
+            "result",
+            "testresult",
+            "test_result",
+            "pass_fail",
+            "passfail",
+            "pf",
+            "status",
+        ],
+    )
+
+
+def normalize_station(text: str) -> str | None:
+    if not text:
+        return None
+    upper = text.upper()
+    if "DDMI" in upper:
+        return "DDMI"
+    if "3T" in upper and "BER" in upper:
+        return "3T BER"
+    if "TC" in upper and "BER" in upper:
+        return "TC BER"
+    if "BURN" in upper:
+        return "Burn In"
+    if "FINAL" in upper:
+        return "Final"
+    if "SWITCH" in upper:
+        return "Switch"
+    if "TP2TP3_LT" in upper or "_LT" in upper or upper.endswith("LT") or upper.startswith("LT"):
+        return "LT"
+    if "TP2TP3_HT" in upper or "_HT" in upper or upper.endswith("HT") or upper.startswith("HT"):
+        return "HT"
+    if "TP2TP3_RT" in upper or "_RT" in upper or upper.endswith("RT") or upper.startswith("RT"):
+        return "RT"
+    return None
+
+
+def determine_station(row: pd.Series, station_column: str | None) -> str | None:
+    if station_column:
+        value = row.get(station_column)
+        station = normalize_station(str(value)) if value is not None else None
+        if station:
+            return station
+    value = row.get(CH_NUMBER_HEADER)
+    return normalize_station(str(value)) if value is not None else None
+
+
+def is_pass(value: object) -> bool:
+    if value is None:
+        return False
+    text = str(value).strip().upper()
+    return text in {"PASS", "P", "OK", "TRUE", "1", "Y", "YES"}
+
+
+def determine_sort_columns(df: pd.DataFrame) -> list[str]:
+    candidates = [
+        "test_datetime",
+        "TEST_DATETIME",
+        "TestDateTime",
+        "TESTNUMBER",
+        "TestNumber",
+        "TEST_TIME",
+        "TESTDATE",
+    ]
+    columns = [col for col in candidates if col in df.columns]
+    return columns if columns else []
+
+
+def split_into_tests(group_df: pd.DataFrame, expected_count: int, sort_columns: list[str]) -> list[pd.DataFrame]:
+    if sort_columns:
+        group_df = group_df.sort_values(sort_columns)
+    total_rows = len(group_df)
+    if total_rows == 0:
+        return []
+    tests = []
+    for start in range(0, total_rows, expected_count):
+        tests.append(group_df.iloc[start : start + expected_count])
+    return tests
+
+
+def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]:
+    component_column = find_component_column(list(df.columns))
+    result_column = find_result_column(list(df.columns))
+    station_column = find_station_column(list(df.columns))
+
+    df = df.copy()
+    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
+    df = df[df["_station"].isin(STATION_ORDER)]
+
+    if not result_column:
+        print("⚠️ 找不到結果欄位，良率將以 0 計算")
+
+    sort_columns = determine_sort_columns(df)
+    metrics: dict[str, dict[str, float]] = {}
+    for station in STATION_ORDER:
+        station_df = df[df["_station"] == station]
+        expected_count = 8 if station in {"DDMI", "RT", "LT", "HT"} else 24
+        fpy_input = 0
+        fpy_output = 0
+        retest_input = 0
+        retest_output = 0
+
+        for _, group in station_df.groupby(component_column):
+            tests = split_into_tests(group, expected_count, sort_columns)
+            if not tests:
+                continue
+            fpy_input += 1
+            if result_column and all(is_pass(val) for val in tests[0][result_column]):
+                fpy_output += 1
+            if len(tests) > 1:
+                retest_input += len(tests) - 1
+                if result_column:
+                    retest_output += sum(
+                        1 for test_df in tests[1:] if all(is_pass(val) for val in test_df[result_column])
+                    )
+
+        fpy_rate = fpy_output / fpy_input if fpy_input else 0
+        retest_rate = retest_output / retest_input if retest_input else 0
+        metrics[station] = {
+            "fpy_input": fpy_input,
+            "fpy_output": fpy_output,
+            "fpy_rate": fpy_rate,
+            "retest_input": retest_input,
+            "retest_output": retest_output,
+            "retest_rate": retest_rate,
+        }
+    return metrics
+
+
+def load_output_workbook(base_dir: str) -> Workbook:
+    template_path = os.path.join(base_dir, FUNCTION_TEMPLATE)
+    if os.path.exists(template_path):
+        return load_workbook(template_path)
+    workbook = Workbook()
+    if workbook.active:
+        workbook.remove(workbook.active)
+    workbook.create_sheet(DATA_ANALYSIS_SHEET)
+    return workbook
+
+
+def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
+    if sheet_name in workbook.sheetnames:
+        del workbook[sheet_name]
+    ws = workbook.create_sheet(title=sheet_name)
+    for row in dataframe_to_rows(df, index=False, header=True):
+        ws.append(row)
+
+
+def populate_data_analysis_sheet(workbook: Workbook, metrics: dict[str, dict[str, float]]) -> None:
+    if DATA_ANALYSIS_SHEET not in workbook.sheetnames:
+        workbook.create_sheet(DATA_ANALYSIS_SHEET)
+    ws = workbook[DATA_ANALYSIS_SHEET]
+
+    fpy_row_map = {
+        "DDMI": 3,
+        "RT": 4,
+        "LT": 5,
+        "HT": 6,
+        "Burn In": 7,
+        "3T BER": 8,
+        "TC BER": 9,
+        "Final": 10,
+        "Switch": 11,
+    }
+    retest_row_map = {
+        "DDMI": 16,
+        "RT": 17,
+        "LT": 18,
+        "HT": 19,
+        "Burn In": 20,
+        "3T BER": 21,
+        "TC BER": 22,
+        "Final": 23,
+        "Switch": 24,
+    }
+
+    for station, row in fpy_row_map.items():
+        data = metrics.get(station, {})
+        ws[f"B{row}"] = data.get("fpy_input", 0)
+        ws[f"C{row}"] = data.get("fpy_output", 0)
+        ws[f"D{row}"] = data.get("fpy_rate", 0)
+
+    for station, row in retest_row_map.items():
+        data = metrics.get(station, {})
+        ws[f"B{row}"] = data.get("retest_input", 0)
+        ws[f"C{row}"] = data.get("retest_output", 0)
+        ws[f"D{row}"] = data.get("retest_rate", 0)
+
+
 def main():
     args = parse_args()
     test_login()
@@ -162,14 +397,17 @@ def main():
 
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
+            metrics = build_data_analysis_metrics(df)
 
-            with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-                for category in categories:
-                    sheet_df = df[df["_category"] == category].drop(columns=["_category"])
-                    sheet_name = category
-                    if sheet_df.empty:
-                        sheet_df = df.head(0).drop(columns=["_category"])
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            workbook = load_output_workbook(base_dir)
+            for category in categories:
+                sheet_df = df[df["_category"] == category].drop(columns=["_category"])
+                if sheet_df.empty:
+                    sheet_df = df.head(0).drop(columns=["_category"])
+                write_dataframe_to_sheet(workbook, category, sheet_df)
+
+            populate_data_analysis_sheet(workbook, metrics)
+            workbook.save(out_path)
 
             print("📁 Excel 已輸出：", out_path)
 
