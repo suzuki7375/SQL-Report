@@ -503,8 +503,13 @@ def build_pareto_table(
         station_df["error_code"]
         .value_counts()
         .reset_index()
-        .rename(columns={"index": "Error Code", "error_code": "Fail Q'ty"})
     )
+    if "index" in counts.columns:
+        counts = counts.rename(columns={"index": "Error Code", "error_code": "Fail Q'ty"})
+    else:
+        value_col = "error_code" if "error_code" in counts.columns else counts.columns[0]
+        count_col = "count" if "count" in counts.columns else counts.columns[1]
+        counts = counts.rename(columns={value_col: "Error Code", count_col: "Fail Q'ty"})
     counts["Fail Q'ty"] = pd.to_numeric(counts["Fail Q'ty"], errors="coerce").fillna(0)
     output_total_value = pd.to_numeric(output_total, errors="coerce")
     if pd.isna(output_total_value):
