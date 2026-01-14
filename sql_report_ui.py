@@ -10,6 +10,7 @@ from tkinter import ttk
 
 
 SCRIPT_NAME = "800G_TRX_TEST.py"
+BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
 
 
@@ -196,13 +197,23 @@ def build_ui() -> tk.Tk:
             return
         base_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(base_dir, SCRIPT_NAME)
-        running_process = subprocess.Popen([sys.executable, script_path], cwd=base_dir)
+        running_process = subprocess.Popen(
+            [
+                sys.executable,
+                script_path,
+                "--start-date",
+                start_picker.value,
+                "--end-date",
+                end_picker.value,
+            ],
+            cwd=base_dir,
+        )
         set_loading(True)
         check_process()
 
     main_button = ttk.Button(
         buttons_frame,
-        text=SCRIPT_NAME,
+        text=BUTTON_LABEL,
         command=run_trx_test,
         style="Primary.TButton",
     )
