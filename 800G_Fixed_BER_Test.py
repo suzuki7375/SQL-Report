@@ -45,6 +45,41 @@ STATION_ORDER = [
     "ATS",
     "Switch",
 ]
+THREE_T_BER_ITEMS = [
+    "1_Pretest",
+    "2_Pretest",
+    "3_Pretest",
+    "4_Pretest",
+    "5_Pretest",
+    "6_Pretest",
+    "7_Pretest",
+    "8_Pretest",
+    "1_RT",
+    "2_RT",
+    "3_RT",
+    "4_RT",
+    "5_RT",
+    "6_RT",
+    "7_RT",
+    "8_RT",
+    "1_LT",
+    "2_LT",
+    "3_LT",
+    "4_LT",
+    "5_LT",
+    "6_LT",
+    "7_LT",
+    "8_LT",
+    "1_HT",
+    "2_HT",
+    "3_HT",
+    "4_HT",
+    "5_HT",
+    "6_HT",
+    "7_HT",
+    "8_HT",
+]
+THREE_T_BER_ITEM_SET = {item.lower() for item in THREE_T_BER_ITEMS}
 
 
 def parse_args() -> argparse.Namespace:
@@ -131,6 +166,8 @@ def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
 
 def classify_ch_number(value: str) -> str:
     text = str(value) if value is not None else ""
+    if is_three_t_ber_channel(text):
+        return "3T_BER"
     if "ATS" in text:
         return "ATS"
     if "DDMI" in text:
@@ -207,6 +244,8 @@ def normalize_station(text: str) -> str | None:
     if not text:
         return None
     upper = text.upper()
+    if is_three_t_ber_channel(text):
+        return "3T BER"
     if "DDMI" in upper:
         return "DDMI"
     if "3T" in upper and "BER" in upper:
@@ -263,6 +302,11 @@ def normalize_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def is_three_t_ber_channel(value: object) -> bool:
+    text = normalize_text(value).lower()
+    return text in THREE_T_BER_ITEM_SET
 
 
 def has_value(value: object) -> bool:
@@ -349,6 +393,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     component_column = find_component_column(list(df.columns))
     result_column = find_result_column(list(df.columns))
     station_column = find_station_column(list(df.columns))
+    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
     df = df.copy()
     df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
@@ -356,12 +401,19 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
 
     if not result_column:
         print("⚠️ 找不到結果欄位，良率將以 0 計算")
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，3T BER 良率將以 0 計算")
 
     sort_columns = determine_sort_columns(df)
     metrics: dict[str, dict[str, float]] = {}
     for station in STATION_ORDER:
         station_df = df[df["_station"] == station]
-        expected_count = 8 if station in {"DDMI", "RT", "LT", "HT"} else 24
+        if station == "3T BER":
+            expected_count = 32
+        elif station in {"DDMI", "RT", "LT", "HT"}:
+            expected_count = 8
+        else:
+            expected_count = 24
         fpy_input = 0
         fpy_output = 0
         retest_input = 0
@@ -372,14 +424,34 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
             if not tests:
                 continue
             fpy_input += 1
-            if result_column and all(is_pass(val) for val in tests[0][result_column]):
-                fpy_output += 1
+            if station == "3T BER":
+                if ch_pass_fail_columns and all(
+                    is_pass(value)
+                    for column in ch_pass_fail_columns
+                    for value in tests[0][column]
+                ):
+                    fpy_output += 1
+            else:
+                if result_column and all(is_pass(val) for val in tests[0][result_column]):
+                    fpy_output += 1
             if len(tests) > 1:
                 retest_input += len(tests) - 1
-                if result_column:
-                    retest_output += sum(
-                        1 for test_df in tests[1:] if all(is_pass(val) for val in test_df[result_column])
-                    )
+                if station == "3T BER":
+                    if ch_pass_fail_columns:
+                        retest_output += sum(
+                            1
+                            for test_df in tests[1:]
+                            if all(
+                                is_pass(value)
+                                for column in ch_pass_fail_columns
+                                for value in test_df[column]
+                            )
+                        )
+                else:
+                    if result_column:
+                        retest_output += sum(
+                            1 for test_df in tests[1:] if all(is_pass(val) for val in test_df[result_column])
+                        )
 
         fpy_rate = fpy_output / fpy_input if fpy_input else 0
         retest_rate = retest_output / retest_input if retest_input else 0
@@ -635,7 +707,7 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
+            categories = ["ATS", "DDMI", "LT", "HT", "RT", "3T_BER", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
