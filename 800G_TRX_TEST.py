@@ -294,12 +294,21 @@ def load_error_code_mapping(workbook: Workbook) -> list[tuple[str, str]]:
 
 
 def match_error_code(value: object, mapping: list[tuple[str, str]]) -> str:
-    text = normalize_text(value).lower()
+    text = normalize_text(value)
     if not text:
         return ""
+
+    prefix = text.split(":", 1)[0].strip()
+    if prefix:
+        for error_code, _ in mapping:
+            if error_code.lower() == prefix.lower():
+                return error_code
+        return prefix
+
+    lowered = text.lower()
     for error_code, pattern in mapping:
         pattern_text = pattern.lower()
-        if pattern_text in text or text in pattern_text:
+        if pattern_text in lowered or lowered in pattern_text:
             return error_code
     return ""
 
