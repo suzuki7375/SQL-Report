@@ -583,9 +583,23 @@ def populate_data_analysis_sheet(
         ws[f"C{row}"] = data.get("retest_output", 0)
         ws[f"D{row}"] = data.get("retest_rate", 0)
 
-    rt_output = metrics.get("RT", {}).get("fpy_output", 0)
-    rt_pareto = build_pareto_table(failed_components, "RT", rt_output)
-    write_pareto_table(ws, start_row=43, table=rt_pareto, clear_until_row=56)
+    pareto_configs = [
+        ("DDMI", 28, 41),
+        ("RT", 43, 56),
+        ("LT", 58, 71),
+        ("HT", 73, 86),
+        ("ATS", 88, 100),
+    ]
+
+    for station, start_row, clear_until_row in pareto_configs:
+        output_total = metrics.get(station, {}).get("fpy_output", 0)
+        pareto_table = build_pareto_table(failed_components, station, output_total)
+        write_pareto_table(
+            ws,
+            start_row=start_row,
+            table=pareto_table,
+            clear_until_row=clear_until_row,
+        )
 
 
 def main():
