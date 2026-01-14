@@ -8,6 +8,7 @@ import time
 import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import MergedCell
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 SERVER = "omddb"
@@ -530,11 +531,23 @@ def write_pareto_table(
 ) -> None:
     for row in range(start_row + 1, clear_until_row + 1):
         for col in range(1, len(PARETO_COLUMNS) + 1):
-            ws.cell(row=row, column=col, value=None)
+            set_cell_value(ws, row, col, None)
 
     for idx, row in enumerate(table.itertuples(index=False), start=start_row + 1):
         for col_index, value in enumerate(row, start=1):
-            ws.cell(row=idx, column=col_index, value=value)
+            set_cell_value(ws, idx, col_index, value)
+
+
+def set_cell_value(ws, row: int, column: int, value: object) -> None:
+    cell = ws.cell(row=row, column=column)
+    if not isinstance(cell, MergedCell):
+        cell.value = value
+        return
+    for merged_range in ws.merged_cells.ranges:
+        if cell.coordinate in merged_range:
+            if row == merged_range.min_row and column == merged_range.min_col:
+                ws.cell(row=merged_range.min_row, column=merged_range.min_col, value=value)
+            return
 
 
 def populate_data_analysis_sheet(
@@ -571,15 +584,15 @@ def populate_data_analysis_sheet(
 
     for station, row in fpy_row_map.items():
         data = metrics.get(station, {})
-        ws[f"B{row}"] = data.get("fpy_input", 0)
-        ws[f"C{row}"] = data.get("fpy_output", 0)
-        ws[f"D{row}"] = data.get("fpy_rate", 0)
+        set_cell_value(ws, row, 2, data.get("fpy_input", 0))
+        set_cell_value(ws, row, 3, data.get("fpy_output", 0))
+        set_cell_value(ws, row, 4, data.get("fpy_rate", 0))
 
     for station, row in retest_row_map.items():
         data = metrics.get(station, {})
-        ws[f"B{row}"] = data.get("retest_input", 0)
-        ws[f"C{row}"] = data.get("retest_output", 0)
-        ws[f"D{row}"] = data.get("retest_rate", 0)
+        set_cell_value(ws, row, 2, data.get("retest_input", 0))
+        set_cell_value(ws, row, 3, data.get("retest_output", 0))
+        set_cell_value(ws, row, 4, data.get("retest_rate", 0))
 
     pareto_configs = [
         ("DDMI", 28, 41),
