@@ -38,7 +38,7 @@ STATION_ORDER = [
     "Burn In",
     "3T BER",
     "TC BER",
-    "Final",
+    "ATS",
     "Switch",
 ]
 
@@ -196,10 +196,10 @@ def normalize_station(text: str) -> str | None:
         return "3T BER"
     if "TC" in upper and "BER" in upper:
         return "TC BER"
+    if "ATS" in upper:
+        return "ATS"
     if "BURN" in upper:
         return "Burn In"
-    if "FINAL" in upper:
-        return "Final"
     if "SWITCH" in upper:
         return "Switch"
     if "TP2TP3_LT" in upper or "_LT" in upper or upper.endswith("LT") or upper.startswith("LT"):
@@ -369,7 +369,7 @@ def populate_data_analysis_sheet(workbook: Workbook, metrics: dict[str, dict[str
         "Burn In": 7,
         "3T BER": 8,
         "TC BER": 9,
-        "Final": 10,
+        "ATS": 10,
         "Switch": 11,
     }
     retest_row_map = {
@@ -380,7 +380,7 @@ def populate_data_analysis_sheet(workbook: Workbook, metrics: dict[str, dict[str
         "Burn In": 20,
         "3T BER": 21,
         "TC BER": 22,
-        "Final": 23,
+        "ATS": 23,
         "Switch": 24,
     }
 
