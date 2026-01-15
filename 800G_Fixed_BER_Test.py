@@ -349,7 +349,7 @@ def build_component_error_codes(df: pd.DataFrame) -> dict[str, str]:
         print("⚠️ 找不到 CH_Pass_Fail 欄位，Error code 將為空白")
         return {}
 
-    target_categories = {"ATS", "DDMI", "RT", "LT", "HT"}
+    target_categories = {"3T_BER"}
     if "_category" in df.columns:
         source_df = df[df["_category"].isin(target_categories)]
     else:
@@ -477,11 +477,11 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     sort_columns = determine_sort_columns(df)
     failed_tests: list[pd.DataFrame] = []
 
-    for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+    for category in ["3T_BER"]:
         category_df = df[df["_category"] == category]
         if category_df.empty:
             continue
-        expected_count = 24 if category == "ATS" else 8
+        expected_count = 32
         for _, group in category_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
@@ -497,6 +497,9 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     else:
         failed_df = df.head(0)
 
+    if "BER1" in failed_df.columns:
+        failed_df = failed_df[failed_df["BER1"].apply(has_value)]
+
     return failed_df.drop(columns=["_category"], errors="ignore")
 
 
@@ -511,11 +514,11 @@ def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     sort_columns = determine_sort_columns(df)
     records: list[dict[str, str]] = []
 
-    for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+    for category in ["3T_BER"]:
         category_df = df[df["_category"] == category]
         if category_df.empty:
             continue
-        expected_count = 24 if category == "ATS" else 8
+        expected_count = 32
         for component_id, group in category_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
