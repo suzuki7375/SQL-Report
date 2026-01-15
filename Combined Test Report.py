@@ -9,10 +9,8 @@ import time
 
 import pandas as pd
 import pyodbc
-import master
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.utils.dataframe import dataframe_to_rows
 
 OUTPUT_EXTENSION = ".xlsx"
 FUNCTION_TEMPLATE = "Function.xlsx"
@@ -70,24 +68,6 @@ def ensure_data_analysis_template(workbook: Workbook) -> object:
     if DATA_ANALYSIS_SHEET in workbook.sheetnames:
         return workbook[DATA_ANALYSIS_SHEET]
     return workbook.create_sheet(DATA_ANALYSIS_SHEET)
-
-
-def _find_last_data_row(ws) -> int:
-    for row_idx in range(ws.max_row, 0, -1):
-        if any(cell.value is not None for cell in ws[row_idx]):
-            return row_idx
-    return 0
-
-
-def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
-    if sheet_name in workbook.sheetnames:
-        ws = workbook[sheet_name]
-    else:
-        ws = workbook.create_sheet(title=sheet_name)
-    last_row = _find_last_data_row(ws)
-    include_header = last_row == 0
-    for row in dataframe_to_rows(df, index=False, header=include_header):
-        ws.append(row)
 
 
 def set_cell_value(ws, row: int, column: int, value: object) -> None:
@@ -320,8 +300,6 @@ def main() -> None:
             report_results[report["sheet_prefix"]] = result
 
         populate_combined_data_analysis(workbook, report_results)
-        master_df = master.fetch_master_dataframe(start_date, end_date)
-        write_dataframe_to_sheet(workbook, "master", master_df)
 
         workbook.save(out_path)
         print("📁 Combined Excel 已輸出：", out_path)

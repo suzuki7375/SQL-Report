@@ -7,7 +7,6 @@ import time
 
 import pandas as pd
 import pyodbc
-import master
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
@@ -777,8 +776,6 @@ def main():
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
             populate_data_analysis_sheet(workbook, metrics, failed_devices, failed_components)
-            master_df = master.fetch_master_dataframe(args.start_date, args.end_date)
-            write_dataframe_to_sheet(workbook, "master", master_df)
             workbook.save(out_path)
 
             print("📁 Excel 已輸出：", out_path)
