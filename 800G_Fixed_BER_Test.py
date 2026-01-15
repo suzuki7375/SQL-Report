@@ -633,13 +633,23 @@ def write_pareto_table(
     table: pd.DataFrame,
     clear_until_row: int,
 ) -> None:
-    for row in range(start_row + 1, clear_until_row + 1):
-        for col in range(1, len(PARETO_COLUMNS) + 1):
-            ws.cell(row=row, column=col, value=None)
+    clear_pareto_table(ws, start_row, clear_until_row)
+    if table.empty:
+        return
 
     for idx, row in enumerate(table.itertuples(index=False), start=start_row + 1):
         for col_index, value in enumerate(row, start=1):
             ws.cell(row=idx, column=col_index, value=value)
+
+
+def clear_pareto_table(
+    ws,
+    start_row: int,
+    clear_until_row: int,
+) -> None:
+    for row in range(start_row + 1, clear_until_row + 1):
+        for col in range(1, len(PARETO_COLUMNS) + 1):
+            ws.cell(row=row, column=col, value=None)
 
 
 def populate_data_analysis_sheet(
