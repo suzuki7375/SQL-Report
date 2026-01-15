@@ -11,19 +11,11 @@ from tkinter import ttk
 
 SCRIPT_NAME = "800G_TRX_TEST.py"
 FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
+SYMBOL_ERROR_SCRIPT_NAME = "BER_Symbol_Error_Test.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
+SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(SYMBOL_ERROR_SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
-PR_HISTORY_FILE = "PR_HISTORY.txt"
-PR_HISTORY_ENTRIES = [
-    {
-        "version": "版本 1",
-        "summary": [
-            "新增 PR 變更紀錄文字檔輸出。",
-            "每版內容以分隔線區隔。",
-        ],
-    },
-]
 
 
 class DatePicker(ttk.Frame):
@@ -229,6 +221,9 @@ def build_ui() -> tk.Tk:
     def run_fixed_ber_test() -> None:
         run_report(FIXED_BER_SCRIPT_NAME)
 
+    def run_symbol_error_test() -> None:
+        run_report(SYMBOL_ERROR_SCRIPT_NAME)
+
     main_button = ttk.Button(
         buttons_frame,
         text=BUTTON_LABEL,
@@ -247,7 +242,16 @@ def build_ui() -> tk.Tk:
     fixed_ber_button.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
     button_refs.append(fixed_ber_button)
 
-    for index in range(2, BUTTON_COUNT):
+    symbol_error_button = ttk.Button(
+        buttons_frame,
+        text=SYMBOL_ERROR_BUTTON_LABEL,
+        command=run_symbol_error_test,
+        style="Primary.TButton",
+    )
+    symbol_error_button.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    button_refs.append(symbol_error_button)
+
+    for index in range(3, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
@@ -257,20 +261,6 @@ def build_ui() -> tk.Tk:
     return root
 
 
-def write_pr_history(base_dir: str) -> None:
-    lines: list[str] = []
-    for entry in PR_HISTORY_ENTRIES:
-        lines.append(entry["version"])
-        for item in entry["summary"]:
-            lines.append(f"- {item}")
-        lines.append("--------------------------------")
-    output_path = os.path.join(base_dir, PR_HISTORY_FILE)
-    with open(output_path, "w", encoding="utf-8") as output_file:
-        output_file.write("\n".join(lines).rstrip() + "\n")
-
-
 if __name__ == "__main__":
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    write_pr_history(base_dir)
     app = build_ui()
     app.mainloop()
