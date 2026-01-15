@@ -11,10 +11,12 @@ import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 OUTPUT_EXTENSION = ".xlsx"
 FUNCTION_TEMPLATE = "Function.xlsx"
 DATA_ANALYSIS_SHEET = "Data Analysis"
+EQUIPMENT_STATUS_SHEET = "equiment status"
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,6 +108,23 @@ def export_report_dataframe(module, start_date: str, end_date: str) -> pd.DataFr
     return module.apply_header(df)
 
 
+def find_location_column(columns: list[str]) -> str | None:
+    candidates = [
+        "location",
+        "testlocation",
+        "test_location",
+        "stationlocation",
+        "station_location",
+        "site",
+        "testsite",
+        "test_site",
+        "line",
+        "testline",
+        "test_line",
+    ]
+    return next((col for col in columns if col.lower() in candidates), None)
+
+
 def resolve_equipment_warning(sheet_prefix: str) -> str:
     if sheet_prefix == "800G_TRX":
         return "⚠️ TRX 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
@@ -160,6 +179,179 @@ def should_add_equipment(sheet_prefix: str, category: str) -> bool:
     return False
 
 
+def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
+    if sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        if ws.max_row:
+            ws.delete_rows(1, ws.max_row)
+    else:
+        ws = workbook.create_sheet(title=sheet_name)
+    for row in dataframe_to_rows(df, index=False, header=True):
+        ws.append(row)
+
+
+def _add_equipment_column(df: pd.DataFrame, module, equipment_map: dict[str, str]) -> pd.DataFrame:
+    if equipment_map and hasattr(module, "add_equipment_column"):
+        return module.add_equipment_column(df, equipment_map)
+    if "Equipment" not in df.columns:
+        df = df.copy()
+        df["Equipment"] = ""
+    return df
+
+
+def _add_location_column(df: pd.DataFrame, location_column: str | None) -> pd.DataFrame:
+    df = df.copy()
+    if location_column and location_column in df.columns:
+        df["Location"] = df[location_column].fillna("")
+    else:
+        df["Location"] = ""
+    return df
+
+
+def _compute_group_fpy(
+    df: pd.DataFrame,
+    group_fields: list[str],
+    module,
+    expected_count: int,
+    use_ch_pass_fail: bool = False,
+) -> list[dict[str, object]]:
+    component_column = module.find_component_column(list(df.columns))
+    result_column = module.find_result_column(list(df.columns))
+    ch_pass_fail_columns = module.find_ch_pass_fail_columns(list(df.columns))
+    sort_columns = module.determine_sort_columns(df)
+
+    if use_ch_pass_fail and not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，良率將以 0 計算")
+    if not use_ch_pass_fail and not result_column:
+        print("⚠️ 找不到結果欄位，良率將以 0 計算")
+
+    rows: list[dict[str, object]] = []
+    grouped = df.groupby(group_fields, dropna=False) if group_fields else [((), df)]
+    for keys, group_df in grouped:
+        fpy_input = 0
+        fpy_output = 0
+        for _, component_group in group_df.groupby(component_column):
+            tests = module.split_into_tests(component_group, expected_count, sort_columns)
+            if not tests:
+                continue
+            fpy_input += 1
+            passed = False
+            if use_ch_pass_fail:
+                if ch_pass_fail_columns:
+                    passed = all(
+                        module.is_pass(value)
+                        for column in ch_pass_fail_columns
+                        for value in tests[0][column]
+                    )
+            else:
+                if result_column:
+                    passed = all(module.is_pass(val) for val in tests[0][result_column])
+            if passed:
+                fpy_output += 1
+        fpy_rate = fpy_output / fpy_input if fpy_input else 0
+        if group_fields:
+            if len(group_fields) == 1:
+                key_map = {group_fields[0]: keys}
+            else:
+                key_map = dict(zip(group_fields, keys))
+        else:
+            key_map = {}
+        rows.append(
+            {
+                **key_map,
+                "fpy_input": fpy_input,
+                "fpy_output": fpy_output,
+                "fpy_rate": fpy_rate,
+            }
+        )
+    return rows
+
+
+def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+
+    trx_result = report_results.get("800G_TRX")
+    if trx_result:
+        module = trx_result["module"]
+        equipment_map = trx_result.get("equipment_map", {})
+        df = trx_result["df"].copy()
+        df = _add_equipment_column(df, module, equipment_map)
+        location_column = find_location_column(list(df.columns))
+        if not location_column:
+            print("⚠️ TRX 資料查不到 Location 欄位，Location 會留空")
+        df = _add_location_column(df, location_column)
+        for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+            category_df = df[df["_category"] == category]
+            if category_df.empty:
+                continue
+            expected_count = 24 if category == "ATS" else 8
+            group_fields = ["Equipment"] if category in {"ATS", "DDMI"} else ["Equipment", "Location"]
+            for row in _compute_group_fpy(category_df, group_fields, module, expected_count):
+                row.update(
+                    {
+                        "Report": "800G_TRX_TEST",
+                        "Category": category,
+                    }
+                )
+                if "Location" not in row:
+                    row["Location"] = ""
+                rows.append(row)
+
+    fixed_result = report_results.get("800G_Fixed_BER")
+    if fixed_result:
+        module = fixed_result["module"]
+        equipment_map = fixed_result.get("equipment_map", {})
+        df = fixed_result["df"].copy()
+        df = _add_equipment_column(df, module, equipment_map)
+        location_column = find_location_column(list(df.columns))
+        if not location_column:
+            print("⚠️ 3T BER 資料查不到 Location 欄位，Location 會留空")
+        df = _add_location_column(df, location_column)
+        category_df = df[df["_category"] == "3T_BER"]
+        if not category_df.empty:
+            for row in _compute_group_fpy(category_df, ["Equipment", "Location"], module, 32, use_ch_pass_fail=True):
+                row.update(
+                    {
+                        "Report": "800G_Fixed_BER_Test",
+                        "Category": "3T_BER",
+                    }
+                )
+                rows.append(row)
+
+    symbol_result = report_results.get("BER_Symbol_Error")
+    if symbol_result:
+        module = symbol_result["module"]
+        equipment_map = symbol_result.get("equipment_map", {})
+        df = symbol_result["df"].copy()
+        df = _add_equipment_column(df, module, equipment_map)
+        location_column = find_location_column(list(df.columns))
+        if not location_column:
+            print("⚠️ BER 資料查不到 Location 欄位，Location 會留空")
+        df = _add_location_column(df, location_column)
+        category_df = df[df["_category"] == "TC_BER"]
+        if not category_df.empty:
+            for row in _compute_group_fpy(category_df, ["Equipment", "Location"], module, 32, use_ch_pass_fail=True):
+                row.update(
+                    {
+                        "Report": "BER_Symbol_Error_Test",
+                        "Category": "TC_BER",
+                    }
+                )
+                rows.append(row)
+
+    if not rows:
+        return pd.DataFrame(
+            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "fpy_rate"]
+        )
+
+    table = pd.DataFrame(rows)
+    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "fpy_rate"]
+    for column in column_order:
+        if column not in table.columns:
+            table[column] = ""
+    return table[column_order]
+
+
 def build_report(
     module,
     sheet_prefix: str,
@@ -198,6 +390,8 @@ def build_report(
 
     module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} Failed Device", failed_devices)
     return {
+        "df": df,
+        "equipment_map": equipment_map,
         "module": module,
         "metrics": metrics,
         "failed_devices": failed_devices,
@@ -361,6 +555,8 @@ def main() -> None:
             report_results[report["sheet_prefix"]] = result
 
         populate_combined_data_analysis(workbook, report_results)
+        equipment_status = build_equipment_status_table(report_results)
+        write_dataframe_to_sheet(workbook, EQUIPMENT_STATUS_SHEET, equipment_status)
 
         workbook.save(out_path)
         print("📁 Combined Excel 已輸出：", out_path)
