@@ -128,12 +128,25 @@ def build_ui() -> tk.Tk:
     style.theme_use("clam")
     style.configure("Main.TFrame", background="#f7f7fb")
     style.configure("Card.TFrame", background="#ffffff", relief="ridge")
-    style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), padding=10)
-    style.configure("Secondary.TButton", font=("Segoe UI", 10), padding=10)
+    style.configure(
+        "Primary.TButton",
+        font=("Segoe UI", 9, "bold"),
+        padding=10,
+        relief="raised",
+        borderwidth=2,
+    )
+    style.configure(
+        "Secondary.TButton",
+        font=("Segoe UI", 9),
+        padding=10,
+        relief="raised",
+        borderwidth=2,
+    )
     style.configure("Date.TButton", padding=4)
     style.configure("Title.TLabel", font=("Segoe UI", 12, "bold"), background="#f7f7fb")
     style.configure("Sub.TLabel", font=("Segoe UI", 9), foreground="#555555", background="#f7f7fb")
     style.configure("Status.TLabel", font=("Segoe UI", 9, "italic"), background="#f7f7fb")
+    style.configure("Panel.TFrame", background="#ffffff", relief="groove", borderwidth=2)
 
     main_frame = ttk.Frame(root, padding=20, style="Main.TFrame")
     main_frame.pack(fill="both", expand=True)
@@ -141,10 +154,13 @@ def build_ui() -> tk.Tk:
     header_frame = ttk.Frame(main_frame, style="Main.TFrame")
     header_frame.pack(fill="x")
 
-    ttk.Label(header_frame, text="SQL 資料查詢", style="Title.TLabel").pack(anchor="w")
+    ttk.Label(header_frame, text="800G 2FR4 資料查詢", style="Title.TLabel").pack(anchor="w")
     ttk.Label(header_frame, text="請選擇日期區間後開始查詢", style="Sub.TLabel").pack(anchor="w", pady=(2, 12))
 
-    date_frame = ttk.Frame(main_frame, style="Main.TFrame")
+    content_frame = ttk.Frame(main_frame, style="Panel.TFrame", padding=12)
+    content_frame.pack(fill="both", expand=True)
+
+    date_frame = ttk.Frame(content_frame, style="Panel.TFrame")
     date_frame.pack(fill="x", pady=(0, 12))
 
     ttk.Label(date_frame, text="日期", style="Title.TLabel").pack(side="left")
@@ -157,7 +173,7 @@ def build_ui() -> tk.Tk:
     end_picker = DatePicker(date_frame, today)
     end_picker.pack(side="left", padx=(8, 0))
 
-    status_frame = ttk.Frame(main_frame, style="Main.TFrame")
+    status_frame = ttk.Frame(content_frame, style="Panel.TFrame")
     status_frame.pack(fill="x")
 
     status_var = tk.StringVar(value="待機中")
@@ -167,7 +183,7 @@ def build_ui() -> tk.Tk:
     progress = ttk.Progressbar(status_frame, mode="indeterminate")
     progress.pack(side="right", fill="x", expand=True, padx=(12, 0))
 
-    buttons_frame = ttk.Frame(main_frame, style="Main.TFrame")
+    buttons_frame = ttk.Frame(content_frame, style="Panel.TFrame")
     buttons_frame.pack(fill="both", expand=True, pady=(16, 0))
 
     buttons_frame.columnconfigure((0, 1, 2), weight=1)
