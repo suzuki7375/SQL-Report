@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 from typing import Final
 from urllib.parse import quote_plus
 
@@ -68,8 +69,19 @@ def log_connection_info() -> None:
     print(f"   DRIVER={DRIVER}")
 
 
+def extract_report_location(sql_text: str) -> str:
+    match = re.search(r"FROM\s+([^\s;]+)", sql_text, re.IGNORECASE)
+    return match.group(1) if match else "未知"
+
+
+def log_report_location(sql_text: str) -> None:
+    location = extract_report_location(sql_text)
+    print("2. 報表位置")
+    print(f"   {location}")
+
+
 def log_report_header(df: pd.DataFrame) -> None:
-    print("2. 是否看到報表header")
+    print("3. 是否看到報表header")
     if df.columns.empty:
         raise ValueError("未取得報表header，請確認 SQL 查詢結果。")
     headers = ", ".join(str(column) for column in df.columns)
@@ -81,6 +93,7 @@ def main() -> None:
     sql_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), SQL_FILE)
     sql_text = load_sql(sql_path)
     log_connection_info()
+    log_report_location(sql_text)
     df = fetch_master_data(sql_text)
     log_report_header(df)
     output_path = build_output_path(args.output_dir)
