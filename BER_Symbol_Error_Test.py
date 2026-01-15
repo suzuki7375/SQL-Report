@@ -224,6 +224,18 @@ def find_station_column(columns: list[str]) -> str | None:
     return find_column(columns, ["station", "teststation", "test_station"])
 
 
+def find_test_item_column(columns: list[str]) -> str | None:
+    return find_column(
+        columns,
+        [
+            TEST_ITEM_HEADER.lower(),
+            "testitem",
+            "test_item",
+            "test item",
+        ],
+    )
+
+
 def find_result_column(columns: list[str]) -> str | None:
     return find_column(
         columns,
@@ -270,14 +282,33 @@ def normalize_station(text: str) -> str | None:
     return None
 
 
-def determine_station(row: pd.Series, station_column: str | None) -> str | None:
-    if station_column:
-        value = row.get(station_column)
+def determine_station(
+    row: pd.Series,
+    station_column: str | None,
+    test_item_column: str | None,
+) -> str | None:
+    for column in (station_column, test_item_column):
+        if not column:
+            continue
+        value = row.get(column)
         station = normalize_station(str(value)) if value is not None else None
         if station:
             return station
     value = row.get(CH_NUMBER_HEADER)
     return normalize_station(str(value)) if value is not None else None
+
+
+def classify_category(
+    row: pd.Series,
+    station_column: str | None,
+    test_item_column: str | None,
+) -> str:
+    station = determine_station(row, station_column, test_item_column)
+    if station == "3T BER":
+        return "3T_BER"
+    if station == "TC BER":
+        return "TC_BER"
+    return "其他"
 
 
 def is_pass(value: object) -> bool:
@@ -364,10 +395,14 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     component_column = find_component_column(list(df.columns))
     result_column = find_result_column(list(df.columns))
     station_column = find_station_column(list(df.columns))
+    test_item_column = find_test_item_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
     df = df.copy()
-    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
+    df["_station"] = df.apply(
+        lambda row: determine_station(row, station_column, test_item_column),
+        axis=1,
+    )
     df = df[df["_station"].isin(STATION_ORDER)]
 
     if not result_column:
@@ -477,6 +512,7 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
 def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     component_column = find_component_column(list(df.columns))
     station_column = find_station_column(list(df.columns))
+    test_item_column = find_test_item_column(list(df.columns))
     result_column = find_result_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
@@ -488,7 +524,10 @@ def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     records: list[dict[str, str]] = []
 
     df = df.copy()
-    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
+    df["_station"] = df.apply(
+        lambda row: determine_station(row, station_column, test_item_column),
+        axis=1,
+    )
     df = df[df["_station"].isin(STATION_ORDER)]
 
     for station in STATION_ORDER:
@@ -751,7 +790,12 @@ def main():
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
             categories = ["3T_BER", "TC_BER", "其他"]
-            df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
+            station_column = find_station_column(list(df.columns))
+            test_item_column = find_test_item_column(list(df.columns))
+            df["_category"] = df.apply(
+                lambda row: classify_category(row, station_column, test_item_column),
+                axis=1,
+            )
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
