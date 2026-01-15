@@ -258,7 +258,11 @@ def find_ch_pass_fail_columns(columns: list[str]) -> list[str]:
 def normalize_station(text: str) -> str | None:
     if not text:
         return None
-    upper = text.upper()
+    upper = text.upper().strip()
+    if upper in {"TC", "TCBER", "TC_BER"} or upper.startswith(("TC_", "TC-")):
+        return "TC BER"
+    if upper in {"3T", "3TBER", "3T_BER"} or upper.startswith(("3T_", "3T-")):
+        return "3T BER"
     if is_three_t_ber_channel(text):
         return "3T BER"
     if "DDMI" in upper:
