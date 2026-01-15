@@ -31,5 +31,5 @@ SELECT [SID]
       ,[Location]
       ,[Port_SN]
       ,[AOIBert_SN]
-  FROM [工八_PEREADONLY].[LK2MES-DB-REAL].[dbo].[V_PE_PRD_TestResult_BER_Symbol_Error_Test]
+  FROM [工八_PEREADONLY].[LK2MES-DB-REAL].[dbo].[V_PE_PRD_TestResult_800G_BER_Symbol_Error_Test]
 GO
