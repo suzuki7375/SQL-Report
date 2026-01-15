@@ -12,10 +12,12 @@ from tkinter import ttk
 SCRIPT_NAME = "800G_TRX_TEST.py"
 FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
 BER_SYMBOL_ERROR_SCRIPT_NAME = "BER_Symbol_Error_Test.py"
+COMBINED_REPORT_SCRIPT_NAME = "Combined Test Report.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
-BUTTON_COUNT = 5
+COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
+BUTTON_COUNT = 6
 
 
 class DatePicker(ttk.Frame):
@@ -224,6 +226,9 @@ def build_ui() -> tk.Tk:
     def run_ber_symbol_error_test() -> None:
         run_report(BER_SYMBOL_ERROR_SCRIPT_NAME)
 
+    def run_combined_report() -> None:
+        run_report(COMBINED_REPORT_SCRIPT_NAME)
+
     main_button = ttk.Button(
         buttons_frame,
         text=BUTTON_LABEL,
@@ -251,7 +256,16 @@ def build_ui() -> tk.Tk:
     symbol_error_button.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
     button_refs.append(symbol_error_button)
 
-    for index in range(3, BUTTON_COUNT):
+    combined_report_button = ttk.Button(
+        buttons_frame,
+        text=COMBINED_REPORT_BUTTON_LABEL,
+        command=run_combined_report,
+        style="Primary.TButton",
+    )
+    combined_report_button.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+    button_refs.append(combined_report_button)
+
+    for index in range(4, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
