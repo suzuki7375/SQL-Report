@@ -10,6 +10,7 @@ import time
 import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import MergedCell
 
 OUTPUT_EXTENSION = ".xlsx"
 FUNCTION_TEMPLATE = "Function.xlsx"
@@ -69,9 +70,16 @@ def ensure_data_analysis_template(workbook: Workbook) -> object:
     return workbook.create_sheet(DATA_ANALYSIS_SHEET)
 
 
-def create_data_analysis_sheet(workbook: Workbook, template_ws, sheet_name: str) -> None:
-    ws = workbook.copy_worksheet(template_ws)
-    ws.title = sheet_name
+def set_cell_value(ws, row: int, column: int, value: object) -> None:
+    cell = ws.cell(row=row, column=column)
+    if not isinstance(cell, MergedCell):
+        cell.value = value
+        return
+    for merged_range in ws.merged_cells.ranges:
+        if cell.coordinate in merged_range:
+            if row == merged_range.min_row and column == merged_range.min_col:
+                ws.cell(row=merged_range.min_row, column=merged_range.min_col, value=value)
+            return
 
 
 def export_report_dataframe(module, start_date: str, end_date: str) -> pd.DataFrame:
@@ -104,11 +112,9 @@ def build_report(
     categories: list[str],
     category_builder,
     workbook: Workbook,
-    template_ws,
     start_date: str,
     end_date: str,
-    populate_data_analysis,
-) -> None:
+) -> dict[str, object]:
     print(f"\n🚀 開始整合：{sheet_prefix}")
     t0 = time.time()
 
@@ -131,33 +137,115 @@ def build_report(
         module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} {category}", sheet_df)
 
     module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} Failed Device", failed_devices)
-
-    data_analysis_sheet_name = f"{sheet_prefix} {module.DATA_ANALYSIS_SHEET}"
-    create_data_analysis_sheet(workbook, template_ws, data_analysis_sheet_name)
-    original_sheet_name = module.DATA_ANALYSIS_SHEET
-    module.DATA_ANALYSIS_SHEET = data_analysis_sheet_name
-    populate_data_analysis(module, workbook, metrics, failed_devices, failed_components)
-    module.DATA_ANALYSIS_SHEET = original_sheet_name
-
-
-def populate_trx_data_analysis(
-    module,
-    workbook: Workbook,
-    metrics: dict[str, dict[str, float]],
-    _failed_devices: pd.DataFrame,
-    failed_components: pd.DataFrame,
-) -> None:
-    module.populate_data_analysis_sheet(workbook, metrics, failed_components)
+    return {
+        "module": module,
+        "metrics": metrics,
+        "failed_devices": failed_devices,
+        "failed_components": failed_components,
+    }
 
 
-def populate_standard_data_analysis(
-    module,
-    workbook: Workbook,
-    metrics: dict[str, dict[str, float]],
-    failed_devices: pd.DataFrame,
-    failed_components: pd.DataFrame,
-) -> None:
-    module.populate_data_analysis_sheet(workbook, metrics, failed_devices, failed_components)
+def populate_combined_data_analysis(workbook: Workbook, report_results: dict[str, dict[str, object]]) -> None:
+    ws = ensure_data_analysis_template(workbook)
+
+    trx_result = report_results.get("800G_TRX")
+    fixed_result = report_results.get("800G_Fixed_BER")
+    symbol_result = report_results.get("BER_Symbol_Error")
+
+    combined_metrics: dict[str, dict[str, float]] = {}
+    if trx_result:
+        combined_metrics.update(trx_result["metrics"])
+    if fixed_result:
+        combined_metrics["3T BER"] = fixed_result["metrics"].get("3T BER", {})
+    if symbol_result:
+        combined_metrics["TC BER"] = symbol_result["metrics"].get("TC BER", {})
+
+    fpy_row_map = {
+        "DDMI": 3,
+        "RT": 4,
+        "LT": 5,
+        "HT": 6,
+        "Burn In": 7,
+        "3T BER": 8,
+        "TC BER": 9,
+        "ATS": 10,
+        "Switch": 11,
+    }
+    retest_row_map = {
+        "DDMI": 16,
+        "RT": 17,
+        "LT": 18,
+        "HT": 19,
+        "Burn In": 20,
+        "3T BER": 21,
+        "TC BER": 22,
+        "ATS": 23,
+        "Switch": 24,
+    }
+
+    for station, row in fpy_row_map.items():
+        data = combined_metrics.get(station, {})
+        set_cell_value(ws, row, 2, data.get("fpy_input", 0))
+        set_cell_value(ws, row, 3, data.get("fpy_output", 0))
+        set_cell_value(ws, row, 4, data.get("fpy_rate", 0))
+
+    for station, row in retest_row_map.items():
+        data = combined_metrics.get(station, {})
+        set_cell_value(ws, row, 2, data.get("retest_input", 0))
+        set_cell_value(ws, row, 3, data.get("retest_output", 0))
+        set_cell_value(ws, row, 4, data.get("retest_rate", 0))
+
+    if trx_result:
+        trx_module = trx_result["module"]
+        pareto_configs = [
+            ("DDMI", 28, 41),
+            ("RT", 43, 56),
+            ("LT", 58, 71),
+            ("HT", 73, 86),
+            ("ATS", 88, 100),
+        ]
+        for station, start_row, clear_until_row in pareto_configs:
+            input_total = trx_result["metrics"].get(station, {}).get("fpy_input", 0)
+            pareto_table = trx_module.build_pareto_table(
+                trx_result["failed_components"],
+                station,
+                input_total,
+            )
+            trx_module.write_pareto_table(
+                ws,
+                start_row=start_row,
+                table=pareto_table,
+                clear_until_row=clear_until_row,
+            )
+
+    if fixed_result:
+        fixed_module = fixed_result["module"]
+        input_total = fixed_result["metrics"].get("3T BER", {}).get("fpy_input", 0)
+        pareto_table = fixed_module.build_failed_device_pareto_table(
+            fixed_result["failed_devices"],
+            input_total,
+        )
+        fixed_module.write_pareto_table(
+            ws,
+            start_row=103,
+            table=pareto_table,
+            clear_until_row=115,
+        )
+
+    if symbol_result:
+        symbol_module = symbol_result["module"]
+        input_total = symbol_result["metrics"].get("TC BER", {}).get("fpy_input", 0)
+        pareto_table = symbol_module.build_pareto_table(
+            symbol_result["failed_components"],
+            "TC BER",
+            input_total,
+        )
+        symbol_module.write_pareto_table(
+            ws,
+            start_row=118,
+            table=pareto_table,
+            clear_until_row=130,
+        )
 
 
 def main() -> None:
@@ -175,7 +263,6 @@ def main() -> None:
             "module_name": "report_trx_test",
             "categories": ["ATS", "DDMI", "LT", "HT", "RT", "其他"],
             "category_builder": lambda df, module: module.classify_ch_number_series(df[module.CH_NUMBER_HEADER]),
-            "populate_data_analysis": populate_trx_data_analysis,
         },
         {
             "sheet_prefix": "800G_Fixed_BER",
@@ -183,7 +270,6 @@ def main() -> None:
             "module_name": "report_fixed_ber_test",
             "categories": ["3T_BER", "其他"],
             "category_builder": lambda df, module: df[module.CH_NUMBER_HEADER].apply(module.classify_ch_number),
-            "populate_data_analysis": populate_standard_data_analysis,
         },
         {
             "sheet_prefix": "BER_Symbol_Error",
@@ -191,31 +277,29 @@ def main() -> None:
             "module_name": "report_symbol_error_test",
             "categories": ["TC_BER", "其他"],
             "category_builder": lambda df, module: df[module.CH_NUMBER_HEADER].apply(module.classify_ch_number),
-            "populate_data_analysis": populate_standard_data_analysis,
         },
     ]
 
     workbook = load_template_workbook(base_dir)
-    template_ws = ensure_data_analysis_template(workbook)
+    ensure_data_analysis_template(workbook)
+    report_results: dict[str, dict[str, object]] = {}
 
     try:
         for report in reports:
             module_path = os.path.join(base_dir, report["module_file"])
             module = load_module(module_path, report["module_name"])
-            build_report(
+            result = build_report(
                 module,
                 report["sheet_prefix"],
                 report["categories"],
                 report["category_builder"],
                 workbook,
-                template_ws,
                 start_date,
                 end_date,
-                report["populate_data_analysis"],
             )
+            report_results[report["sheet_prefix"]] = result
 
-        if DATA_ANALYSIS_SHEET in workbook.sheetnames:
-            workbook.remove(workbook[DATA_ANALYSIS_SHEET])
+        populate_combined_data_analysis(workbook, report_results)
 
         workbook.save(out_path)
         print("📁 Combined Excel 已輸出：", out_path)

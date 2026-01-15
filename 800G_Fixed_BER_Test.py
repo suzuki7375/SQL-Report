@@ -752,7 +752,7 @@ def populate_data_analysis_sheet(
         ("LT", 58, 71, "components", True),
         ("HT", 73, 86, "components", True),
         ("ATS", 88, 100, "components", True),
-        ("3T BER", 103, 115, "failed_devices", False),
+        ("3T BER", 103, 115, "failed_devices", True),
         ("TC BER", 118, 130, "components", True),
     ]
 
