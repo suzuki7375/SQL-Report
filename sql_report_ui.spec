@@ -13,6 +13,7 @@ analysis = Analysis(
         ("800G_Fixed_BER_Test.py", "."),
         ("BER_Symbol_Error_Test.py", "."),
         ("Combined Test Report.py", "."),
+        ("master.py", "."),
         ("Function.xlsx", "."),
     ],
     hiddenimports=collect_submodules("tkinter"),
