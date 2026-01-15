@@ -10,6 +10,16 @@
 因為腳本檔名包含數字與空白，PyInstaller 無法把它們視為可直接 import 的模組，
 所以必須「以資料檔」方式一起打包，避免執行時找不到檔案。
 
+## 開發環境相依套件
+
+執行 `master.py` 需要安裝資料庫連線與資料處理套件，請先安裝：
+
+```bash
+python -m pip install sqlalchemy pyodbc pandas
+```
+
+> 若出現 `No module named 'sqlalchemy'`，代表尚未安裝上述套件。
+
 ## 方式一：使用提供的 spec 檔案
 
 ```bash
