@@ -121,46 +121,66 @@ class DatePicker(ttk.Frame):
 def build_ui() -> tk.Tk:
     root = tk.Tk()
     root.title("800G 2FR4 SQL DATA")
-    root.geometry("620x360")
+    root.geometry("700x420")
     root.configure(bg="#f7f7fb")
 
     style = ttk.Style(root)
     style.theme_use("clam")
     style.configure("Main.TFrame", background="#f7f7fb")
-    style.configure("Card.TFrame", background="#ffffff", relief="ridge")
+    style.configure("Card.TFrame", background="#ffffff", relief="ridge", borderwidth=1)
     style.configure(
         "Primary.TButton",
         font=("Segoe UI", 9, "bold"),
-        padding=10,
+        padding=(12, 10),
         relief="raised",
         borderwidth=2,
+        background="#f0f2f6",
+        foreground="#1f2933",
+        bordercolor="#9ca3af",
+        lightcolor="#ffffff",
+        darkcolor="#a8b0bf",
     )
     style.configure(
         "Secondary.TButton",
         font=("Segoe UI", 9),
-        padding=10,
+        padding=(12, 10),
         relief="raised",
         borderwidth=2,
+        background="#f8f9fb",
+        foreground="#4b5563",
+        bordercolor="#b8c1d1",
+        lightcolor="#ffffff",
+        darkcolor="#b0b7c4",
+    )
+    style.map(
+        "Primary.TButton",
+        background=[("pressed", "#d9dee8"), ("active", "#f7f9fc")],
+        relief=[("pressed", "sunken"), ("!pressed", "raised")],
+    )
+    style.map(
+        "Secondary.TButton",
+        background=[("pressed", "#e2e7f1"), ("active", "#f3f5f9")],
+        relief=[("pressed", "sunken"), ("!pressed", "raised")],
     )
     style.configure("Date.TButton", padding=4)
     style.configure("Title.TLabel", font=("Segoe UI", 12, "bold"), background="#f7f7fb")
     style.configure("Sub.TLabel", font=("Segoe UI", 9), foreground="#555555", background="#f7f7fb")
     style.configure("Status.TLabel", font=("Segoe UI", 9, "italic"), background="#f7f7fb")
-    style.configure("Panel.TFrame", background="#ffffff", relief="groove", borderwidth=2)
+    style.configure("Panel.TFrame", background="#ffffff", relief="groove", borderwidth=1)
 
-    main_frame = ttk.Frame(root, padding=20, style="Main.TFrame")
+    main_frame = ttk.Frame(root, padding=24, style="Main.TFrame")
     main_frame.pack(fill="both", expand=True)
 
     header_frame = ttk.Frame(main_frame, style="Main.TFrame")
     header_frame.pack(fill="x")
 
     ttk.Label(header_frame, text="800G 2FR4 資料查詢", style="Title.TLabel").pack(anchor="w")
-    ttk.Label(header_frame, text="請選擇日期區間後開始查詢", style="Sub.TLabel").pack(anchor="w", pady=(2, 12))
+    ttk.Label(header_frame, text="請選擇日期區間後開始查詢", style="Sub.TLabel").pack(anchor="w", pady=(4, 16))
 
-    content_frame = ttk.Frame(main_frame, style="Panel.TFrame", padding=12)
+    content_frame = ttk.Frame(main_frame, style="Panel.TFrame", padding=16)
     content_frame.pack(fill="both", expand=True)
 
-    date_frame = ttk.Frame(content_frame, style="Panel.TFrame")
+    date_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     date_frame.pack(fill="x", pady=(0, 12))
 
     ttk.Label(date_frame, text="日期", style="Title.TLabel").pack(side="left")
@@ -173,7 +193,7 @@ def build_ui() -> tk.Tk:
     end_picker = DatePicker(date_frame, today)
     end_picker.pack(side="left", padx=(8, 0))
 
-    status_frame = ttk.Frame(content_frame, style="Panel.TFrame")
+    status_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     status_frame.pack(fill="x")
 
     status_var = tk.StringVar(value="待機中")
@@ -181,12 +201,12 @@ def build_ui() -> tk.Tk:
     status_label.pack(side="left")
 
     progress = ttk.Progressbar(status_frame, mode="indeterminate")
-    progress.pack(side="right", fill="x", expand=True, padx=(12, 0))
+    progress.pack(side="right", fill="x", expand=True, padx=(16, 0))
 
-    buttons_frame = ttk.Frame(content_frame, style="Panel.TFrame")
+    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(10, 6))
     buttons_frame.pack(fill="both", expand=True, pady=(16, 0))
 
-    buttons_frame.columnconfigure((0, 1, 2), weight=1)
+    buttons_frame.columnconfigure((0, 1, 2), weight=1, uniform="button")
     buttons_frame.rowconfigure((0, 1), weight=1)
 
     button_refs: list[ttk.Button] = []
@@ -251,7 +271,7 @@ def build_ui() -> tk.Tk:
         command=run_trx_test,
         style="Primary.TButton",
     )
-    main_button.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    main_button.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
     button_refs.append(main_button)
 
     fixed_ber_button = ttk.Button(
@@ -260,7 +280,7 @@ def build_ui() -> tk.Tk:
         command=run_fixed_ber_test,
         style="Primary.TButton",
     )
-    fixed_ber_button.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    fixed_ber_button.grid(row=0, column=1, padx=12, pady=12, sticky="nsew")
     button_refs.append(fixed_ber_button)
 
     symbol_error_button = ttk.Button(
@@ -269,7 +289,7 @@ def build_ui() -> tk.Tk:
         command=run_ber_symbol_error_test,
         style="Primary.TButton",
     )
-    symbol_error_button.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    symbol_error_button.grid(row=0, column=2, padx=12, pady=12, sticky="nsew")
     button_refs.append(symbol_error_button)
 
     combined_report_button = ttk.Button(
@@ -278,14 +298,14 @@ def build_ui() -> tk.Tk:
         command=run_combined_report,
         style="Primary.TButton",
     )
-    combined_report_button.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+    combined_report_button.grid(row=1, column=0, padx=12, pady=12, sticky="nsew")
     button_refs.append(combined_report_button)
 
     for index in range(4, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
-        button.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+        button.grid(row=row, column=col, padx=12, pady=12, sticky="nsew")
         button_refs.append(button)
 
     return root
