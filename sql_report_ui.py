@@ -14,6 +14,16 @@ FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
+PR_HISTORY_FILE = "PR_HISTORY.txt"
+PR_HISTORY_ENTRIES = [
+    {
+        "version": "版本 1",
+        "summary": [
+            "新增 PR 變更紀錄文字檔輸出。",
+            "每版內容以分隔線區隔。",
+        ],
+    },
+]
 
 
 class DatePicker(ttk.Frame):
@@ -247,6 +257,20 @@ def build_ui() -> tk.Tk:
     return root
 
 
+def write_pr_history(base_dir: str) -> None:
+    lines: list[str] = []
+    for entry in PR_HISTORY_ENTRIES:
+        lines.append(entry["version"])
+        for item in entry["summary"]:
+            lines.append(f"- {item}")
+        lines.append("--------------------------------")
+    output_path = os.path.join(base_dir, PR_HISTORY_FILE)
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        output_file.write("\n".join(lines).rstrip() + "\n")
+
+
 if __name__ == "__main__":
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    write_pr_history(base_dir)
     app = build_ui()
     app.mainloop()
