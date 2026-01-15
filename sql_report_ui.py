@@ -320,15 +320,16 @@ def build_ui() -> tk.Tk:
         if running_process is not None:
             return
         base_dir = get_base_dir()
+        args = ["--start-date", start_picker.value, "--end-date", end_picker.value]
         if is_frozen():
             running_process = subprocess.Popen(
-                [sys.executable, "--run-script", MASTER_SCRIPT_NAME],
+                [sys.executable, "--run-script", MASTER_SCRIPT_NAME, *args],
                 cwd=base_dir,
             )
         else:
             script_path = os.path.join(base_dir, MASTER_SCRIPT_NAME)
             running_process = subprocess.Popen(
-                [sys.executable, script_path],
+                [sys.executable, script_path, *args],
                 cwd=base_dir,
             )
         set_loading(True)
