@@ -3,9 +3,10 @@
 import argparse
 import os
 from typing import Final
+from urllib.parse import quote_plus
 
 import pandas as pd
-import pyodbc
+from sqlalchemy import create_engine
 
 
 SERVER: Final = "omddb"
@@ -53,7 +54,9 @@ def build_output_path(base_dir: str) -> str:
 
 
 def fetch_master_data(sql_text: str) -> pd.DataFrame:
-    with pyodbc.connect(conn_str_with_db(DATABASE), timeout=10) as conn:
+    odbc_params = quote_plus(conn_str_with_db(DATABASE))
+    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_params}")
+    with engine.connect() as conn:
         return pd.read_sql_query(sql_text, conn)
 
 
