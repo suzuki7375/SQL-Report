@@ -11,8 +11,10 @@ from tkinter import ttk
 
 SCRIPT_NAME = "800G_TRX_TEST.py"
 FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
+BER_SYMBOL_ERROR_SCRIPT_NAME = "BER_Symbol_Error_Test.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
+BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 BUTTON_COUNT = 5
 
 
@@ -219,6 +221,9 @@ def build_ui() -> tk.Tk:
     def run_fixed_ber_test() -> None:
         run_report(FIXED_BER_SCRIPT_NAME)
 
+    def run_ber_symbol_error_test() -> None:
+        run_report(BER_SYMBOL_ERROR_SCRIPT_NAME)
+
     main_button = ttk.Button(
         buttons_frame,
         text=BUTTON_LABEL,
@@ -237,7 +242,16 @@ def build_ui() -> tk.Tk:
     fixed_ber_button.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
     button_refs.append(fixed_ber_button)
 
-    for index in range(2, BUTTON_COUNT):
+    symbol_error_button = ttk.Button(
+        buttons_frame,
+        text=BER_SYMBOL_ERROR_BUTTON_LABEL,
+        command=run_ber_symbol_error_test,
+        style="Primary.TButton",
+    )
+    symbol_error_button.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+    button_refs.append(symbol_error_button)
+
+    for index in range(3, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
