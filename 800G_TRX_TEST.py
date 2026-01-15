@@ -667,6 +667,19 @@ def populate_data_analysis_sheet(
             clear_until_row=clear_until_row,
         )
 
+    unused_pareto_ranges = [
+        (103, 115),
+        (118, 130),
+    ]
+    empty_pareto = pd.DataFrame(columns=PARETO_COLUMNS)
+    for start_row, clear_until_row in unused_pareto_ranges:
+        write_pareto_table(
+            ws,
+            start_row=start_row,
+            table=empty_pareto,
+            clear_until_row=clear_until_row,
+        )
+
 
 def main():
     args = parse_args()
