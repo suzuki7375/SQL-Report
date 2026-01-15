@@ -181,11 +181,8 @@ def should_add_equipment(sheet_prefix: str, category: str) -> bool:
 
 def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in workbook.sheetnames:
-        ws = workbook[sheet_name]
-        if ws.max_row:
-            ws.delete_rows(1, ws.max_row)
-    else:
-        ws = workbook.create_sheet(title=sheet_name)
+        workbook.remove(workbook[sheet_name])
+    ws = workbook.create_sheet(title=sheet_name)
     for row in dataframe_to_rows(df, index=False, header=True):
         ws.append(row)
 
