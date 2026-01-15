@@ -793,7 +793,7 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["3T_BER", "TC_BER", "其他"]
+            categories = ["TC_BER", "其他"]
             station_column = find_station_column(list(df.columns))
             test_item_column = find_test_item_column(list(df.columns))
             df["_category"] = df.apply(
@@ -806,7 +806,11 @@ def main():
             failed_devices = build_failed_devices(df)
             failed_components = build_failed_component_records(df)
             for category in categories:
-                sheet_df = df[df["_category"] == category].drop(columns=["_category"])
+                if category == "TC_BER":
+                    sheet_df = df[df["_category"].isin(["3T_BER", "TC_BER"])]
+                else:
+                    sheet_df = df[df["_category"] == category]
+                sheet_df = sheet_df.drop(columns=["_category"])
                 if sheet_df.empty:
                     sheet_df = df.head(0).drop(columns=["_category"])
                 write_dataframe_to_sheet(workbook, category, sheet_df)
