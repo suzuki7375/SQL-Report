@@ -487,7 +487,7 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     sort_columns = determine_sort_columns(df)
     failed_tests: list[pd.DataFrame] = []
 
-    for category in ["TC_BER"]:
+    for category in ["3T_BER"]:
         category_df = df[df["_category"] == category]
         if category_df.empty:
             continue
@@ -668,7 +668,7 @@ def build_failed_device_pareto_table(
         return pd.DataFrame(columns=PARETO_COLUMNS)
     failure_code_column = find_failure_code_column(list(failed_devices.columns))
     if not failure_code_column:
-        print("⚠️ 找不到 FailureCodeID 欄位，TC BER Pareto Chart 將為空")
+        print("⚠️ 找不到 FailureCodeID 欄位，3T BER Pareto Chart 將為空")
         return pd.DataFrame(columns=PARETO_COLUMNS)
     return build_pareto_table_from_codes(failed_devices[failure_code_column], input_total)
 
