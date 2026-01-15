@@ -17,6 +17,7 @@ OUTPUT_EXTENSION = ".xlsx"
 FUNCTION_TEMPLATE = "Function.xlsx"
 DATA_ANALYSIS_SHEET = "Data Analysis"
 EQUIPMENT_STATUS_SHEET = "equiment status"
+ERROR_CODE_HEADER_DEFAULT = "Error code"
 
 
 def parse_args() -> argparse.Namespace:
@@ -194,6 +195,37 @@ def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFra
         ws.append(row)
 
 
+def reorder_error_code_column(
+    df: pd.DataFrame,
+    error_code_header: str,
+    insert_after_index: int = 8,
+) -> pd.DataFrame:
+    if error_code_header not in df.columns:
+        return df
+    columns = list(df.columns)
+    if columns.index(error_code_header) == insert_after_index:
+        return df
+    columns.remove(error_code_header)
+    insert_position = min(insert_after_index, len(columns))
+    columns.insert(insert_position, error_code_header)
+    return df[columns]
+
+
+def move_sheet_after(workbook: Workbook, sheet_name: str, after_sheet_name: str) -> None:
+    if sheet_name not in workbook.sheetnames or after_sheet_name not in workbook.sheetnames:
+        return
+    sheet = workbook[sheet_name]
+    after_sheet = workbook[after_sheet_name]
+    workbook._sheets.remove(sheet)
+    insert_index = workbook._sheets.index(after_sheet) + 1
+    workbook._sheets.insert(insert_index, sheet)
+
+
+def hide_sheet(workbook: Workbook, sheet_name: str) -> None:
+    if sheet_name in workbook.sheetnames:
+        workbook[sheet_name].sheet_state = "hidden"
+
+
 def _add_equipment_column(df: pd.DataFrame, module, equipment_map: dict[str, str]) -> pd.DataFrame:
     if equipment_map and hasattr(module, "add_equipment_column"):
         return module.add_equipment_column(df, equipment_map)
@@ -345,11 +377,12 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
 
     if not rows:
         return pd.DataFrame(
-            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "fpy_rate"]
+            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "%"]
         )
 
     table = pd.DataFrame(rows)
-    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "fpy_rate"]
+    table = table.rename(columns={"fpy_rate": "%"})
+    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "%"]
     for column in column_order:
         if column not in table.columns:
             table[column] = ""
@@ -390,8 +423,12 @@ def build_report(
             sheet_df = df.head(0).drop(columns=["_category"])
         if equipment_map and hasattr(module, "add_equipment_column") and should_add_equipment(sheet_prefix, category):
             sheet_df = module.add_equipment_column(sheet_df, equipment_map)
+        error_code_header = getattr(module, "ERROR_CODE_HEADER", ERROR_CODE_HEADER_DEFAULT)
+        sheet_df = reorder_error_code_column(sheet_df, error_code_header)
         module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} {category}", sheet_df)
 
+    error_code_header = getattr(module, "ERROR_CODE_HEADER", ERROR_CODE_HEADER_DEFAULT)
+    failed_devices = reorder_error_code_column(failed_devices, error_code_header)
     module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} Failed Device", failed_devices)
     return {
         "df": df,
@@ -561,6 +598,11 @@ def main() -> None:
         populate_combined_data_analysis(workbook, report_results)
         equipment_status = build_equipment_status_table(report_results)
         write_dataframe_to_sheet(workbook, EQUIPMENT_STATUS_SHEET, equipment_status)
+        move_sheet_after(workbook, EQUIPMENT_STATUS_SHEET, DATA_ANALYSIS_SHEET)
+        hide_sheet(workbook, "Error Code")
+        hide_sheet(workbook, "800G_TRX 其他")
+        hide_sheet(workbook, "800G_Fixed_BER 其他")
+        hide_sheet(workbook, "BER_Symbol_Error 其他")
 
         workbook.save(out_path)
         print("📁 Combined Excel 已輸出：", out_path)
