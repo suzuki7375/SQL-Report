@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import argparse
 import calendar
 import datetime
 import os
+import runpy
 import subprocess
 import sys
 import tkinter as tk
@@ -18,6 +20,38 @@ FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
+
+
+def is_frozen() -> bool:
+    return getattr(sys, "frozen", False)
+
+
+def get_base_dir() -> str:
+    if is_frozen():
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def resolve_script_path(script_name: str) -> str:
+    if is_frozen() and hasattr(sys, "_MEIPASS"):
+        candidate = os.path.join(sys._MEIPASS, script_name)
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(get_base_dir(), script_name)
+
+
+def run_script_from_cli(script_name: str, forwarded_args: list[str]) -> None:
+    script_path = resolve_script_path(script_name)
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(f"找不到腳本檔案: {script_name}")
+    sys.argv = [script_path, *forwarded_args]
+    runpy.run_path(script_path, run_name="__main__")
+
+
+def parse_launcher_args() -> tuple[argparse.Namespace, list[str]]:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--run-script")
+    return parser.parse_known_args()
 
 
 class DatePicker(ttk.Frame):
@@ -237,19 +271,19 @@ def build_ui() -> tk.Tk:
         nonlocal running_process
         if running_process is not None:
             return
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(base_dir, script_name)
-        running_process = subprocess.Popen(
-            [
-                sys.executable,
-                script_path,
-                "--start-date",
-                start_picker.value,
-                "--end-date",
-                end_picker.value,
-            ],
-            cwd=base_dir,
-        )
+        base_dir = get_base_dir()
+        args = ["--start-date", start_picker.value, "--end-date", end_picker.value]
+        if is_frozen():
+            running_process = subprocess.Popen(
+                [sys.executable, "--run-script", script_name, *args],
+                cwd=base_dir,
+            )
+        else:
+            script_path = os.path.join(base_dir, script_name)
+            running_process = subprocess.Popen(
+                [sys.executable, script_path, *args],
+                cwd=base_dir,
+            )
         set_loading(True)
         check_process()
 
@@ -312,5 +346,9 @@ def build_ui() -> tk.Tk:
 
 
 if __name__ == "__main__":
-    app = build_ui()
-    app.mainloop()
+    launch_args, remaining_args = parse_launcher_args()
+    if launch_args.run_script:
+        run_script_from_cli(launch_args.run_script, remaining_args)
+    else:
+        app = build_ui()
+        app.mainloop()
