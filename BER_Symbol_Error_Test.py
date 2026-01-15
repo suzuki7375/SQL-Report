@@ -537,6 +537,21 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     return failed_df.drop(columns=["_category"], errors="ignore")
 
 
+def add_equipment_column(df: pd.DataFrame, equipment_map: dict[str, str]) -> pd.DataFrame:
+    if df.empty or not equipment_map:
+        return df
+    test_column = find_testnumber_column(list(df.columns))
+    if not test_column:
+        print("⚠️ Failed Device sheet 找不到 TESTNUMBER 欄位，Equipment 會留空")
+        return df
+    normalized_testnumbers = df[test_column].map(normalize_testnumber)
+    equipment_series = normalized_testnumbers.map(equipment_map).fillna("")
+    insert_at = df.columns.get_loc(test_column) + 1
+    df_with_equipment = df.copy()
+    df_with_equipment.insert(insert_at, "Equipment", equipment_series)
+    return df_with_equipment
+
+
 def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     component_column = find_component_column(list(df.columns))
     station_column = find_station_column(list(df.columns))
@@ -897,6 +912,7 @@ def main():
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
+            failed_devices = add_equipment_column(failed_devices, equipment_map)
             failed_components = build_failed_component_records(df)
             for category in categories:
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
