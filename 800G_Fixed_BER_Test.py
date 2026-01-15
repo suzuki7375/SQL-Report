@@ -687,10 +687,14 @@ def write_pareto_table(
     start_row: int,
     table: pd.DataFrame,
     clear_until_row: int,
+    write_rows: bool = True,
 ) -> None:
     for row in range(start_row + 1, clear_until_row + 1):
         for col in range(1, len(PARETO_COLUMNS) + 1):
             ws.cell(row=row, column=col, value=None)
+
+    if not write_rows:
+        return
 
     for idx, row in enumerate(table.itertuples(index=False), start=start_row + 1):
         for col_index, value in enumerate(row, start=1):
@@ -743,16 +747,26 @@ def populate_data_analysis_sheet(
         ws[f"D{row}"] = data.get("retest_rate", 0)
 
     pareto_configs = [
-        ("DDMI", 28, 41, "components"),
-        ("RT", 43, 56, "components"),
-        ("LT", 58, 71, "components"),
-        ("HT", 73, 86, "components"),
-        ("ATS", 88, 100, "components"),
-        ("3T BER", 103, 115, "failed_devices"),
-        ("TC BER", 118, 130, "components"),
+        ("DDMI", 28, 41, "components", True),
+        ("RT", 43, 56, "components", True),
+        ("LT", 58, 71, "components", True),
+        ("HT", 73, 86, "components", True),
+        ("ATS", 88, 100, "components", True),
+        ("3T BER", 103, 115, "failed_devices", False),
+        ("TC BER", 118, 130, "components", True),
     ]
 
-    for station, start_row, clear_until_row, source in pareto_configs:
+    empty_pareto = pd.DataFrame(columns=PARETO_COLUMNS)
+    for station, start_row, clear_until_row, source, write_rows in pareto_configs:
+        if not write_rows:
+            write_pareto_table(
+                ws,
+                start_row=start_row,
+                table=empty_pareto,
+                clear_until_row=clear_until_row,
+                write_rows=False,
+            )
+            continue
         input_total = metrics.get(station, {}).get("fpy_input", 0)
         if source == "failed_devices":
             pareto_table = build_failed_device_pareto_table(failed_devices, input_total)
