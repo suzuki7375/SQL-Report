@@ -36,6 +36,7 @@ OUTPUT_EXTENSION = ".xlsx"
 TEST_ITEM_HEADER = "測試項目"
 CH_NUMBER_HEADER = "CHNumber"
 COMPONENT_ID_HEADER = "COMPONENTID"
+TESTNUMBER_HEADER = "TESTNUMBER"
 DATA_ANALYSIS_SHEET = "Data Analysis"
 ERROR_CODE_SHEET = "Error Code"
 FUNCTION_TEMPLATE = "Function.xlsx"
@@ -53,6 +54,8 @@ STATION_ORDER = [
     "ATS",
     "Switch",
 ]
+TRX_SQL_FILE = "800G_TRX_TEST.sql"
+MASTER_SQL_FILE = "MASTER.sql"
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,6 +102,13 @@ def test_login() -> None:
     conn.close()
 
 
+def load_sql(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as file:
+        lines = file.read().splitlines()
+    cleaned_lines = [line for line in lines if line.strip().upper() != "GO"]
+    return "\n".join(cleaned_lines).strip()
+
+
 def build_sorted_query(limit: int | None) -> str:
     top_clause = f"TOP {limit} " if limit else ""
     return f"""
@@ -120,6 +130,29 @@ SELECT {top_clause}*
 FROM base
 WHERE test_date BETWEEN ? AND ?
 ORDER BY test_datetime;
+""".strip()
+
+
+def build_export_query(limit: int | None, base_dir: str) -> str:
+    sql_path = os.path.join(base_dir, TRX_SQL_FILE)
+    if not os.path.exists(sql_path):
+        return build_sorted_query(limit)
+    sql_text = load_sql(sql_path)
+    top_clause = f"TOP {limit} " if limit else ""
+    return f"""
+SELECT {top_clause}*
+FROM ({sql_text}) AS base
+WHERE TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) BETWEEN ? AND ?
+ORDER BY
+    DATETIMEFROMPARTS(
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
+        0,
+        0
+    );
 """.strip()
 
 
@@ -226,6 +259,38 @@ def find_component_column(columns: list[str]) -> str:
     if not column:
         raise KeyError(f"查無欄位 {COMPONENT_ID_HEADER}")
     return column
+
+
+def normalize_testnumber(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def find_testnumber_column(columns: list[str]) -> str | None:
+    return find_column(
+        columns,
+        [
+            TESTNUMBER_HEADER.lower(),
+            "test_number",
+            "testnumber",
+            "testno",
+            "test_no",
+        ],
+    )
+
+
+def find_equipment_column(columns: list[str]) -> str | None:
+    return find_column(
+        columns,
+        [
+            "equipment",
+            "equpment",
+            "equupment",
+            "equp",
+            "eqp",
+        ],
+    )
 
 
 def find_failure_code_column(columns: list[str]) -> str | None:
@@ -368,6 +433,68 @@ def normalize_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _chunked(values: list[str], size: int) -> list[list[str]]:
+    return [values[i : i + size] for i in range(0, len(values), size)]
+
+
+def build_master_query(sql_text: str, placeholders: str) -> str:
+    return f"""
+SELECT *
+FROM ({sql_text}) AS master
+WHERE TESTNUMBER IN ({placeholders});
+""".strip()
+
+
+def fetch_master_equipment_map(
+    conn: pyodbc.Connection,
+    sql_text: str,
+    testnumbers: list[str],
+) -> dict[str, str]:
+    if not testnumbers:
+        return {}
+    cleaned_testnumbers = [
+        normalized
+        for value in testnumbers
+        if (normalized := normalize_testnumber(value))
+    ]
+    if not cleaned_testnumbers:
+        return {}
+    equipment_map: dict[str, str] = {}
+    for chunk in _chunked(cleaned_testnumbers, 900):
+        placeholders = ",".join("?" for _ in chunk)
+        query = build_master_query(sql_text, placeholders)
+        master_df = pd.read_sql_query(query, conn, params=chunk)
+        if master_df.empty:
+            continue
+        test_column = find_testnumber_column(list(master_df.columns))
+        equipment_column = find_equipment_column(list(master_df.columns))
+        if not test_column or not equipment_column:
+            print("⚠️ MASTER.sql 查不到 TESTNUMBER 或 EQUPMENT 欄位，Equipment 會留空")
+            return equipment_map
+        for _, row in master_df[[test_column, equipment_column]].iterrows():
+            test_value = normalize_testnumber(row[test_column])
+            if not test_value:
+                continue
+            equipment_value = row[equipment_column]
+            equipment_map[str(test_value)] = "" if pd.isna(equipment_value) else str(equipment_value)
+    return equipment_map
+
+
+def add_equipment_column(df: pd.DataFrame, equipment_map: dict[str, str]) -> pd.DataFrame:
+    if df.empty or not equipment_map or "Equipment" in df.columns:
+        return df
+    test_column = find_testnumber_column(list(df.columns))
+    if not test_column:
+        print("⚠️ 找不到 TESTNUMBER 欄位，Equipment 會留空")
+        return df
+    normalized_testnumbers = df[test_column].map(normalize_testnumber)
+    equipment_series = normalized_testnumbers.map(equipment_map).fillna("")
+    insert_at = df.columns.get_loc(test_column) + 1
+    df_with_equipment = df.copy()
+    df_with_equipment.insert(insert_at, "Equipment", equipment_series)
+    return df_with_equipment
 
 
 def has_value(value: object) -> bool:
@@ -582,11 +709,21 @@ def load_output_workbook(base_dir: str) -> Workbook:
     return workbook
 
 
+def _find_last_data_row(ws) -> int:
+    for row_idx in range(ws.max_row, 0, -1):
+        if any(cell.value is not None for cell in ws[row_idx]):
+            return row_idx
+    return 0
+
+
 def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in workbook.sheetnames:
-        del workbook[sheet_name]
-    ws = workbook.create_sheet(title=sheet_name)
-    for row in dataframe_to_rows(df, index=False, header=True):
+        ws = workbook[sheet_name]
+    else:
+        ws = workbook.create_sheet(title=sheet_name)
+    last_row = _find_last_data_row(ws)
+    include_header = last_row == 0
+    for row in dataframe_to_rows(df, index=False, header=include_header):
         ws.append(row)
 
 
@@ -757,7 +894,7 @@ def main():
             if use_openquery:
                 export_sql = build_sorted_query_openquery(EXPORT_N, start_date, end_date)
             else:
-                export_sql = build_sorted_query(EXPORT_N)
+                export_sql = build_export_query(EXPORT_N, base_dir)
             export_hint = f"TOP {EXPORT_N}" if EXPORT_N else "全部"
             print(f"\n📤 匯出 {export_hint} 到 Excel：{out_path}")
             t0 = time.time()
@@ -779,17 +916,39 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
+            equipment_map: dict[str, str] = {}
+            testnumber_column = find_testnumber_column(list(df.columns))
+            if not testnumber_column:
+                print("⚠️ TRX 資料查不到 TESTNUMBER 欄位，Equipment 會留空")
+            else:
+                master_sql_path = os.path.join(base_dir, MASTER_SQL_FILE)
+                if os.path.exists(master_sql_path):
+                    master_sql = load_sql(master_sql_path)
+                    testnumbers = (
+                        df[testnumber_column]
+                        .dropna()
+                        .astype(str)
+                        .unique()
+                        .tolist()
+                    )
+                    equipment_map = fetch_master_equipment_map(conn, master_sql, testnumbers)
+                else:
+                    print("⚠️ 找不到 MASTER.sql，Equipment 會留空")
+
             categories = ["ATS", "DDMI", "LT", "HT", "RT", "其他"]
             df["_category"] = classify_ch_number_series(df[CH_NUMBER_HEADER])
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
+            failed_devices = add_equipment_column(failed_devices, equipment_map)
             failed_components = build_failed_component_records(df)
             for category in categories:
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
                     sheet_df = df.head(0).drop(columns=["_category"])
+                if equipment_map and category != "其他":
+                    sheet_df = add_equipment_column(sheet_df, equipment_map)
                 write_dataframe_to_sheet(workbook, category, sheet_df)
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
