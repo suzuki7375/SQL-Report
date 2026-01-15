@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import datetime
 import os
 import sys
 import time
@@ -15,8 +16,13 @@ USERNAME = "PE_ReadOnlyUser"
 PASSWORD = "pe@0505"
 DRIVER = "ODBC Driver 17 for SQL Server"
 DATABASE = "MEQueryManufacturingDatabase"
+LINKED_SERVER = "工八_PEREADONLY"
+REMOTE_DATABASE = "LK2MES-DB-REAL"
+REMOTE_SCHEMA = "dbo"
+REMOTE_VIEW = "V_PE_PRD_TestResult_800G_Fixed_BER_Test"
 
-TARGET_OBJECT = "[工八_PEREADONLY].[LK2MES-DB-REAL].[dbo].[V_PE_PRD_TestResult_800G_Fixed_BER_Test]"
+TARGET_OBJECT = f"[{LINKED_SERVER}].[{REMOTE_DATABASE}].[{REMOTE_SCHEMA}].[{REMOTE_VIEW}]"
+REMOTE_OBJECT = f"[{REMOTE_DATABASE}].[{REMOTE_SCHEMA}].[{REMOTE_VIEW}]"
 
 # 先看資料用
 PREVIEW_N = 20
@@ -90,6 +96,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def parse_date(value: str) -> datetime.date:
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("日期格式需為 YYYY-MM-DD") from exc
+
+
 def conn_str_no_db() -> str:
     return (
         f"DRIVER={{{DRIVER}}};"
@@ -141,6 +154,38 @@ FROM base
 WHERE test_date BETWEEN ? AND ?
 ORDER BY test_datetime;
 """.strip()
+
+
+def openquery_table(inner_sql: str) -> str:
+    escaped = inner_sql.replace("'", "''")
+    return f"OPENQUERY([{LINKED_SERVER}], '{escaped}')"
+
+
+def build_sorted_query_openquery(limit: int, start_date: str, end_date: str) -> str:
+    top_clause = f"TOP {limit} " if limit else ""
+    inner_query = f"""
+SELECT {top_clause}*,
+    TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) AS test_date,
+    DATETIMEFROMPARTS(
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
+        0,
+        0
+    ) AS test_datetime
+FROM {REMOTE_OBJECT}
+WHERE TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) BETWEEN '{start_date}' AND '{end_date}'
+ORDER BY test_datetime
+""".strip()
+    return f"SELECT * FROM {openquery_table(inner_query)}"
+
+
+def build_columns_query(use_openquery: bool) -> str:
+    if use_openquery:
+        return f"SELECT TOP 0 * FROM {openquery_table(f'SELECT * FROM {REMOTE_OBJECT}')}"
+    return f"SELECT TOP 0 * FROM {TARGET_OBJECT}"
 
 
 def apply_header(df: pd.DataFrame) -> pd.DataFrame:
@@ -723,6 +768,8 @@ def populate_data_analysis_sheet(
 
 def main():
     args = parse_args()
+    start_date = parse_date(args.start_date).isoformat()
+    end_date = parse_date(args.end_date).isoformat()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -733,20 +780,34 @@ def main():
         with pyodbc.connect(conn_str_with_db(DATABASE), timeout=30) as conn:
 
             # 1) 先抓 TOP 0 取得欄位（確認你已「進入報表/view」）
+            use_openquery = False
             cur = conn.cursor()
-            cur.execute(f"SELECT TOP 0 * FROM {TARGET_OBJECT};")
-            cols = [d[0] for d in cur.description]
-            print(f"✅ 欄位數：{len(cols)}（已連到該報表 view）")
+            try:
+                cur.execute(build_columns_query(False))
+                cols = [d[0] for d in cur.description]
+                print(f"✅ 欄位數：{len(cols)}（已連到該報表 view）")
+            except pyodbc.Error:
+                print("⚠️ 直接查詢失敗，改用 OPENQUERY 讀取")
+                use_openquery = True
+                cur.execute(build_columns_query(True))
+                cols = [d[0] for d in cur.description]
+                print(f"✅ 欄位數：{len(cols)}（OPENQUERY）")
 
             # 2) 匯出資料（先小量）
-            export_sql = build_sorted_query(EXPORT_N)
+            if use_openquery:
+                export_sql = build_sorted_query_openquery(EXPORT_N, start_date, end_date)
+            else:
+                export_sql = build_sorted_query(EXPORT_N)
             print(f"\n📤 匯出 TOP {EXPORT_N} 到 Excel：{out_path}")
             t0 = time.time()
-            df = pd.read_sql_query(
-                export_sql,
-                conn,
-                params=[args.start_date, args.end_date],
-            )
+            if use_openquery:
+                df = pd.read_sql_query(export_sql, conn)
+            else:
+                df = pd.read_sql_query(
+                    export_sql,
+                    conn,
+                    params=[start_date, end_date],
+                )
             df = apply_header(df)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
             if PREVIEW_N > 0:
