@@ -149,13 +149,15 @@ def classify_ch_number(value: str) -> str:
 
 def classify_ch_number_series(series: pd.Series) -> pd.Series:
     text = series.fillna("").astype(str).str.upper()
-    result = pd.Series("其他", index=series.index, dtype="object")
-    result = result.mask(text.str.contains("ATS"), "ATS")
-    result = result.mask(text.str.contains("DDMI"), "DDMI")
-    result = result.mask(text.str.contains("TP2TP3_LT") | text.str.contains("_LT"), "LT")
-    result = result.mask(text.str.contains("TP2TP3_HT") | text.str.contains("_HT"), "HT")
-    result = result.mask(text.str.contains("TP2TP3_RT") | text.str.contains("_RT"), "RT")
-    return result
+    conditions = [
+        text.str.contains("ATS"),
+        text.str.contains("DDMI"),
+        text.str.contains("TP2TP3_LT") | text.str.contains("_LT"),
+        text.str.contains("TP2TP3_HT") | text.str.contains("_HT"),
+        text.str.contains("TP2TP3_RT") | text.str.contains("_RT"),
+    ]
+    choices = ["ATS", "DDMI", "LT", "HT", "RT"]
+    return pd.Series(np.select(conditions, choices, default="其他"), index=series.index, dtype="object")
 
 
 def find_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -558,17 +560,14 @@ def build_pareto_table(
     if station_df.empty:
         return pd.DataFrame(columns=PARETO_COLUMNS)
 
-    counts = (
-        station_df["error_code"]
-        .value_counts()
-        .reset_index()
-    )
+    counts = station_df["error_code"].value_counts().reset_index()
     if "index" in counts.columns:
         counts = counts.rename(columns={"index": "Error Code", "error_code": "Fail Q'ty"})
     else:
         value_col = "error_code" if "error_code" in counts.columns else counts.columns[0]
         count_col = "count" if "count" in counts.columns else counts.columns[1]
         counts = counts.rename(columns={value_col: "Error Code", count_col: "Fail Q'ty"})
+    counts = counts.head(10)
     counts["Fail Q'ty"] = pd.to_numeric(counts["Fail Q'ty"], errors="coerce").fillna(0)
     input_total_value = pd.to_numeric(input_total, errors="coerce")
     if pd.isna(input_total_value):
