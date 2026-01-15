@@ -15,10 +15,12 @@ SCRIPT_NAME = "800G_TRX_TEST.py"
 FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
 BER_SYMBOL_ERROR_SCRIPT_NAME = "BER_Symbol_Error_Test.py"
 COMBINED_REPORT_SCRIPT_NAME = "Combined Test Report.py"
+MASTER_SCRIPT_NAME = "master.py"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
+MASTER_BUTTON_LABEL = os.path.splitext(MASTER_SCRIPT_NAME)[0]
 BUTTON_COUNT = 6
 
 
@@ -313,6 +315,25 @@ def build_ui() -> tk.Tk:
     def run_combined_report() -> None:
         run_report(COMBINED_REPORT_SCRIPT_NAME)
 
+    def run_master_report() -> None:
+        nonlocal running_process
+        if running_process is not None:
+            return
+        base_dir = get_base_dir()
+        if is_frozen():
+            running_process = subprocess.Popen(
+                [sys.executable, "--run-script", MASTER_SCRIPT_NAME],
+                cwd=base_dir,
+            )
+        else:
+            script_path = os.path.join(base_dir, MASTER_SCRIPT_NAME)
+            running_process = subprocess.Popen(
+                [sys.executable, script_path],
+                cwd=base_dir,
+            )
+        set_loading(True)
+        check_process()
+
     main_button = ttk.Button(
         buttons_frame,
         text=BUTTON_LABEL,
@@ -349,7 +370,16 @@ def build_ui() -> tk.Tk:
     combined_report_button.grid(row=1, column=0, padx=12, pady=12, sticky="nsew")
     button_refs.append(combined_report_button)
 
-    for index in range(4, BUTTON_COUNT):
+    master_button = ttk.Button(
+        buttons_frame,
+        text=MASTER_BUTTON_LABEL,
+        command=run_master_report,
+        style="Primary.TButton",
+    )
+    master_button.grid(row=1, column=1, padx=12, pady=12, sticky="nsew")
+    button_refs.append(master_button)
+
+    for index in range(5, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
         row = index // 3
         col = index % 3
