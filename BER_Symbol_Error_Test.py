@@ -41,7 +41,6 @@ STATION_ORDER = [
     "LT",
     "HT",
     "Burn In",
-    "3T BER",
     "TC BER",
     "ATS",
     "Switch",
@@ -168,7 +167,7 @@ def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
 def classify_ch_number(value: str) -> str:
     text = str(value) if value is not None else ""
     if is_three_t_ber_channel(text):
-        return "3T_BER"
+        return "TC_BER"
     if is_tc_ber_channel(text):
         return "TC_BER"
     if "ATS" in text:
@@ -248,11 +247,11 @@ def normalize_station(text: str) -> str | None:
         return None
     upper = text.upper()
     if is_three_t_ber_channel(text):
-        return "3T BER"
+        return "TC BER"
     if "DDMI" in upper:
         return "DDMI"
     if "3T" in upper and "BER" in upper:
-        return "3T BER"
+        return "TC BER"
     if "TC" in upper and "BER" in upper:
         return "TC BER"
     if "ATS" in upper:
@@ -373,13 +372,13 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     if not result_column:
         print("⚠️ 找不到結果欄位，良率將以 0 計算")
     if not ch_pass_fail_columns:
-        print("⚠️ 找不到 CH_Pass_Fail 欄位，3T BER 良率將以 0 計算")
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，TC BER 良率將以 0 計算")
 
     sort_columns = determine_sort_columns(df)
     metrics: dict[str, dict[str, float]] = {}
     for station in STATION_ORDER:
         station_df = df[df["_station"] == station]
-        if station == "3T BER":
+        if station == "TC BER":
             expected_count = 32
         elif station in {"DDMI", "RT", "LT", "HT"}:
             expected_count = 8
@@ -395,7 +394,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
             if not tests:
                 continue
             fpy_input += 1
-            if station == "3T BER":
+            if station == "TC BER":
                 if ch_pass_fail_columns and all(
                     is_pass(value)
                     for column in ch_pass_fail_columns
@@ -407,7 +406,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
                     fpy_output += 1
             if len(tests) > 1:
                 retest_input += len(tests) - 1
-                if station == "3T BER":
+                if station == "TC BER":
                     if ch_pass_fail_columns:
                         retest_output += sum(
                             1
@@ -448,7 +447,7 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     sort_columns = determine_sort_columns(df)
     failed_tests: list[pd.DataFrame] = []
 
-    for category in ["3T_BER"]:
+    for category in ["TC_BER"]:
         category_df = df[df["_category"] == category]
         if category_df.empty:
             continue
@@ -495,7 +494,7 @@ def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
         station_df = df[df["_station"] == station]
         if station_df.empty:
             continue
-        if station == "3T BER":
+        if station == "TC BER":
             expected_count = 32
         elif station in {"DDMI", "RT", "LT", "HT"}:
             expected_count = 8
@@ -504,7 +503,7 @@ def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
         for component_id, group in station_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
-                if station == "3T BER":
+                if station == "TC BER":
                     if not ch_pass_fail_columns:
                         continue
                     failed = any(
@@ -625,7 +624,7 @@ def build_failed_device_pareto_table(
         return pd.DataFrame(columns=PARETO_COLUMNS)
     failure_code_column = find_failure_code_column(list(failed_devices.columns))
     if not failure_code_column:
-        print("⚠️ 找不到 FailureCodeID 欄位，3T BER Pareto Chart 將為空")
+        print("⚠️ 找不到 FailureCodeID 欄位，TC BER Pareto Chart 將為空")
         return pd.DataFrame(columns=PARETO_COLUMNS)
     return build_pareto_table_from_codes(failed_devices[failure_code_column], input_total)
 
@@ -661,7 +660,6 @@ def populate_data_analysis_sheet(
         "LT": 5,
         "HT": 6,
         "Burn In": 7,
-        "3T BER": 8,
         "TC BER": 9,
         "ATS": 10,
         "Switch": 11,
@@ -672,7 +670,6 @@ def populate_data_analysis_sheet(
         "LT": 18,
         "HT": 19,
         "Burn In": 20,
-        "3T BER": 21,
         "TC BER": 22,
         "ATS": 23,
         "Switch": 24,
@@ -696,7 +693,7 @@ def populate_data_analysis_sheet(
         ("LT", 58, 71, "components"),
         ("HT", 73, 86, "components"),
         ("ATS", 88, 100, "components"),
-        ("3T BER", 103, 115, "failed_devices"),
+        ("TC BER", 103, 115, "failed_devices"),
         ("TC BER", 118, 130, "components"),
     ]
 
@@ -750,7 +747,7 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["3T_BER", "TC_BER", "其他"]
+            categories = ["TC_BER", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
