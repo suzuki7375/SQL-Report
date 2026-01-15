@@ -33,17 +33,31 @@ def get_base_dir() -> str:
 
 
 def resolve_script_path(script_name: str) -> str:
+    candidates: list[str] = []
     if is_frozen() and hasattr(sys, "_MEIPASS"):
-        candidate = os.path.join(sys._MEIPASS, script_name)
+        candidates.append(os.path.join(sys._MEIPASS, script_name))
+    candidates.append(os.path.join(get_base_dir(), script_name))
+    candidates.append(os.path.join(os.getcwd(), script_name))
+    for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
-    return os.path.join(get_base_dir(), script_name)
+    return candidates[0]
 
 
 def run_script_from_cli(script_name: str, forwarded_args: list[str]) -> None:
     script_path = resolve_script_path(script_name)
     if not os.path.exists(script_path):
-        raise FileNotFoundError(f"找不到腳本檔案: {script_name}")
+        searched_locations = []
+        if is_frozen() and hasattr(sys, "_MEIPASS"):
+            searched_locations.append(os.path.join(sys._MEIPASS, script_name))
+        searched_locations.append(os.path.join(get_base_dir(), script_name))
+        searched_locations.append(os.path.join(os.getcwd(), script_name))
+        locations_text = "\n".join(searched_locations)
+        raise FileNotFoundError(
+            f"找不到腳本檔案: {script_name}\n"
+            "請確認打包時有包含該檔案，或將檔案放在執行檔同一資料夾。\n"
+            f"已搜尋路徑:\n{locations_text}"
+        )
     sys.argv = [script_path, *forwarded_args]
     runpy.run_path(script_path, run_name="__main__")
 
