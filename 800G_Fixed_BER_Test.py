@@ -5,7 +5,6 @@ import os
 import sys
 import time
 
-import numpy as np
 import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
@@ -34,7 +33,6 @@ ERROR_CODE_SHEET = "Error Code"
 FUNCTION_TEMPLATE = "Function.xlsx"
 ERROR_CODE_HEADER = "Error code"
 FAILURE_CODE_HEADER = "FailureCodeID"
-RAW_DATA_SHEET = "Fix pareto limit and CHNumber classification codex"
 PARETO_COLUMNS = ["Error Code", "Fail Q'ty", "Failed Rate", "Cum%"]
 PARETO_LIMIT = 10
 STATION_ORDER = [
@@ -182,22 +180,6 @@ def classify_ch_number(value: str) -> str:
     if "TP2TP3_RT" in text or "_RT" in text:
         return "RT"
     return "其他"
-
-
-def classify_ch_number_series(series: pd.Series) -> pd.Series:
-    text = series.fillna("").astype(str)
-    lower = text.str.lower()
-    upper = text.str.upper()
-    conditions = [
-        lower.isin(THREE_T_BER_ITEM_SET),
-        upper.str.contains("ATS"),
-        upper.str.contains("DDMI"),
-        upper.str.contains("TP2TP3_LT") | upper.str.contains("_LT"),
-        upper.str.contains("TP2TP3_HT") | upper.str.contains("_HT"),
-        upper.str.contains("TP2TP3_RT") | upper.str.contains("_RT"),
-    ]
-    choices = ["3T_BER", "ATS", "DDMI", "LT", "HT", "RT"]
-    return pd.Series(np.select(conditions, choices, default="其他"), index=series.index, dtype="object")
 
 
 def find_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -533,11 +515,11 @@ def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     sort_columns = determine_sort_columns(df)
     records: list[dict[str, str]] = []
 
-    for category in ["ATS", "DDMI", "RT", "LT", "HT"]:
+    for category in ["3T_BER"]:
         category_df = df[df["_category"] == category]
         if category_df.empty:
             continue
-        expected_count = 24 if category == "ATS" else 8
+        expected_count = 32
         for component_id, group in category_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
@@ -651,23 +633,13 @@ def write_pareto_table(
     table: pd.DataFrame,
     clear_until_row: int,
 ) -> None:
-    clear_pareto_table(ws, start_row, clear_until_row)
-    if table.empty:
-        return
+    for row in range(start_row + 1, clear_until_row + 1):
+        for col in range(1, len(PARETO_COLUMNS) + 1):
+            ws.cell(row=row, column=col, value=None)
 
     for idx, row in enumerate(table.itertuples(index=False), start=start_row + 1):
         for col_index, value in enumerate(row, start=1):
             ws.cell(row=idx, column=col_index, value=value)
-
-
-def clear_pareto_table(
-    ws,
-    start_row: int,
-    clear_until_row: int,
-) -> None:
-    for row in range(start_row + 1, clear_until_row + 1):
-        for col in range(1, len(PARETO_COLUMNS) + 1):
-            ws.cell(row=row, column=col, value=None)
 
 
 def populate_data_analysis_sheet(
@@ -766,7 +738,6 @@ def main():
                 params=[args.start_date, args.end_date],
             )
             df = apply_header(df)
-            raw_df = df.copy()
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
             if PREVIEW_N > 0:
                 print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")
@@ -776,11 +747,10 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["3T_BER", "ATS", "DDMI", "LT", "HT", "RT", "其他"]
-            df["_category"] = classify_ch_number_series(df[CH_NUMBER_HEADER])
+            categories = ["3T_BER", "其他"]
+            df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
-            write_dataframe_to_sheet(workbook, RAW_DATA_SHEET, raw_df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
             failed_components = build_failed_component_records(df)
@@ -788,7 +758,7 @@ def main():
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
                     sheet_df = df.head(0).drop(columns=["_category"])
-                write_dataframe_to_sheet(workbook, category, sheet_df)
+            write_dataframe_to_sheet(workbook, category, sheet_df)
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
             populate_data_analysis_sheet(workbook, metrics, failed_devices, failed_components)
