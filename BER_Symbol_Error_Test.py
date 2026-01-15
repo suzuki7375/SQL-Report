@@ -228,6 +228,12 @@ def find_column(columns: list[str], candidates: list[str]) -> str | None:
     return None
 
 
+def normalize_testnumber(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
 def find_component_column(columns: list[str]) -> str:
     column = find_column(
         columns,
@@ -622,8 +628,15 @@ def fetch_master_equipment_map(
 ) -> dict[str, str]:
     if not testnumbers:
         return {}
+    cleaned_testnumbers = [
+        normalized
+        for value in testnumbers
+        if (normalized := normalize_testnumber(value))
+    ]
+    if not cleaned_testnumbers:
+        return {}
     equipment_map: dict[str, str] = {}
-    for chunk in _chunked(testnumbers, 900):
+    for chunk in _chunked(cleaned_testnumbers, 900):
         placeholders = ",".join("?" for _ in chunk)
         query = build_master_query(sql_text, placeholders)
         master_df = pd.read_sql_query(query, conn, params=chunk)
@@ -635,8 +648,8 @@ def fetch_master_equipment_map(
             print("⚠️ MASTER.sql 查不到 TESTNUMBER 或 EQUPMENT 欄位，Equipment 會留空")
             return equipment_map
         for _, row in master_df[[test_column, equipment_column]].iterrows():
-            test_value = row[test_column]
-            if pd.isna(test_value):
+            test_value = normalize_testnumber(row[test_column])
+            if not test_value:
                 continue
             equipment_value = row[equipment_column]
             equipment_map[str(test_value)] = "" if pd.isna(equipment_value) else str(equipment_value)
@@ -893,9 +906,9 @@ def main():
                     test_column = find_testnumber_column(list(sheet_df.columns))
                     if test_column:
                         sheet_df = sheet_df.copy()
+                        normalized_testnumbers = sheet_df[test_column].map(normalize_testnumber)
                         sheet_df["Equipment"] = (
-                            sheet_df[test_column]
-                            .astype(str)
+                            normalized_testnumbers
                             .map(equipment_map)
                             .fillna("")
                         )
