@@ -694,6 +694,7 @@ def populate_data_analysis_sheet(
         ("HT", 73, 86, "components"),
         ("ATS", 88, 100, "components"),
         ("TC BER", 103, 115, "failed_devices"),
+        ("TC BER", 118, 130, "components"),
     ]
 
     for station, start_row, clear_until_row, source in pareto_configs:
