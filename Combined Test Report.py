@@ -179,11 +179,18 @@ def should_add_equipment(sheet_prefix: str, category: str) -> bool:
     return False
 
 
+def normalize_excel_value(value: object) -> object:
+    if isinstance(value, (tuple, list, set, dict)):
+        return str(value)
+    return value
+
+
 def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in workbook.sheetnames:
         workbook.remove(workbook[sheet_name])
     ws = workbook.create_sheet(title=sheet_name)
-    for row in dataframe_to_rows(df, index=False, header=True):
+    safe_df = df.applymap(normalize_excel_value)
+    for row in dataframe_to_rows(safe_df, index=False, header=True):
         ws.append(row)
 
 

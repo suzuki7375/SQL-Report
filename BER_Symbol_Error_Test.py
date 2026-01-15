@@ -678,6 +678,12 @@ def _find_last_data_row(ws) -> int:
     return 0
 
 
+def normalize_excel_value(value: object) -> object:
+    if isinstance(value, (tuple, list, set, dict)):
+        return str(value)
+    return value
+
+
 def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
@@ -685,7 +691,8 @@ def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFra
         ws = workbook.create_sheet(title=sheet_name)
     last_row = _find_last_data_row(ws)
     include_header = last_row == 0
-    for row in dataframe_to_rows(df, index=False, header=include_header):
+    safe_df = df.applymap(normalize_excel_value)
+    for row in dataframe_to_rows(safe_df, index=False, header=include_header):
         ws.append(row)
 
 
