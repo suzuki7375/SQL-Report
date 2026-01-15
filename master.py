@@ -60,11 +60,29 @@ def fetch_master_data(sql_text: str) -> pd.DataFrame:
         return pd.read_sql_query(sql_text, conn)
 
 
+def log_connection_info() -> None:
+    print("1. 登入確認資訊是否正確")
+    print(f"   SERVER={SERVER}")
+    print(f"   DATABASE={DATABASE}")
+    print(f"   USERNAME={USERNAME}")
+    print(f"   DRIVER={DRIVER}")
+
+
+def log_report_header(df: pd.DataFrame) -> None:
+    print("2. 是否看到報表header")
+    if df.columns.empty:
+        raise ValueError("未取得報表header，請確認 SQL 查詢結果。")
+    headers = ", ".join(str(column) for column in df.columns)
+    print(f"   報表欄位：{headers}")
+
+
 def main() -> None:
     args = parse_args()
     sql_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), SQL_FILE)
     sql_text = load_sql(sql_path)
+    log_connection_info()
     df = fetch_master_data(sql_text)
+    log_report_header(df)
     output_path = build_output_path(args.output_dir)
     df.to_excel(output_path, index=False)
     print(f"✅ 匯出完成：{output_path}")
