@@ -169,6 +169,8 @@ def classify_ch_number(value: str) -> str:
     text = str(value) if value is not None else ""
     if is_three_t_ber_channel(text):
         return "3T_BER"
+    if is_tc_ber_channel(text):
+        return "TC_BER"
     if "ATS" in text:
         return "ATS"
     if "DDMI" in text:
@@ -310,6 +312,11 @@ def is_three_t_ber_channel(value: object) -> bool:
     return text in THREE_T_BER_ITEM_SET
 
 
+def is_tc_ber_channel(value: object) -> bool:
+    text = normalize_text(value).upper()
+    return "TC" in text and "BER" in text
+
+
 def has_value(value: object) -> bool:
     text = normalize_text(value)
     return text not in {"", "nan", "none", "null"}
@@ -339,54 +346,17 @@ def extract_error_code(value: object) -> str:
     return prefix.split(" ", 1)[0].strip()
 
 
-def build_component_error_codes(df: pd.DataFrame) -> dict[str, str]:
-    component_column = find_component_column(list(df.columns))
-    failure_code_column = find_failure_code_column(list(df.columns))
-    if not failure_code_column:
-        print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
-        return {}
-    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
-    if not ch_pass_fail_columns:
-        print("⚠️ 找不到 CH_Pass_Fail 欄位，Error code 將為空白")
-        return {}
-
-    target_categories = {"3T_BER"}
-    if "_category" in df.columns:
-        source_df = df[df["_category"].isin(target_categories)]
-    else:
-        source_df = df
-
-    sort_columns = determine_sort_columns(source_df)
-    error_codes: dict[str, str] = {}
-    for component_id, group in source_df.groupby(component_column):
-        if sort_columns:
-            group = group.sort_values(sort_columns)
-        selected_code = ""
-        for _, row in group.iterrows():
-            if not any(
-                not is_pass(row.get(column))
-                for column in ch_pass_fail_columns
-            ):
-                continue
-            failure_value = row.get(failure_code_column)
-            if not has_value(failure_value):
-                continue
-            selected_code = extract_error_code(failure_value)
-            if selected_code:
-                break
-        if selected_code:
-            error_codes[component_id] = selected_code
-    return error_codes
-
-
 def apply_error_codes(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         df[ERROR_CODE_HEADER] = ""
         return df
-    component_column = find_component_column(list(df.columns))
-    error_code_map = build_component_error_codes(df)
     df = df.copy()
-    df[ERROR_CODE_HEADER] = df[component_column].map(error_code_map).fillna("")
+    failure_code_column = find_failure_code_column(list(df.columns))
+    if not failure_code_column:
+        print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
+        df[ERROR_CODE_HEADER] = ""
+        return df
+    df[ERROR_CODE_HEADER] = df[failure_code_column].apply(extract_error_code)
     return df
 
 
@@ -506,38 +476,61 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     component_column = find_component_column(list(df.columns))
+    station_column = find_station_column(list(df.columns))
+    result_column = find_result_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
-    if not ch_pass_fail_columns:
-        print("⚠️ 找不到 CH_Pass_Fail 欄位，Pareto 統計將為空")
+    if not ch_pass_fail_columns and not result_column:
+        print("⚠️ 找不到結果欄位或 CH_Pass_Fail 欄位，Pareto 統計將為空")
         return pd.DataFrame(columns=["category", "component_id", "error_code"])
 
     sort_columns = determine_sort_columns(df)
     records: list[dict[str, str]] = []
 
-    for category in ["3T_BER"]:
-        category_df = df[df["_category"] == category]
-        if category_df.empty:
+    df = df.copy()
+    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
+    df = df[df["_station"].isin(STATION_ORDER)]
+
+    for station in STATION_ORDER:
+        station_df = df[df["_station"] == station]
+        if station_df.empty:
             continue
-        expected_count = 32
-        for component_id, group in category_df.groupby(component_column):
+        if station == "3T BER":
+            expected_count = 32
+        elif station in {"DDMI", "RT", "LT", "HT"}:
+            expected_count = 8
+        else:
+            expected_count = 24
+        for component_id, group in station_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
-                if any(
-                    not is_pass(value)
-                    for column in ch_pass_fail_columns
-                    for value in test_df[column]
-                ):
-                    error_code = ""
-                    if ERROR_CODE_HEADER in test_df.columns:
-                        error_code = normalize_text(test_df[ERROR_CODE_HEADER].iloc[0])
-                    records.append(
-                        {
-                            "category": category,
-                            "component_id": str(component_id),
-                            "error_code": error_code,
-                        }
+                if station == "3T BER":
+                    if not ch_pass_fail_columns:
+                        continue
+                    failed = any(
+                        not is_pass(value)
+                        for column in ch_pass_fail_columns
+                        for value in test_df[column]
                     )
+                else:
+                    if not result_column:
+                        continue
+                    failed = any(not is_pass(val) for val in test_df[result_column])
+                if not failed:
+                    continue
+                error_code = ""
+                if ERROR_CODE_HEADER in test_df.columns:
+                    for value in test_df[ERROR_CODE_HEADER]:
+                        error_code = normalize_text(value)
+                        if error_code:
+                            break
+                records.append(
+                    {
+                        "category": station,
+                        "component_id": str(component_id),
+                        "error_code": error_code,
+                    }
+                )
 
     return pd.DataFrame(records, columns=["category", "component_id", "error_code"])
 
@@ -757,7 +750,7 @@ def main():
             if CH_NUMBER_HEADER not in df.columns:
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
-            categories = ["3T_BER", "其他"]
+            categories = ["3T_BER", "TC_BER", "其他"]
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
