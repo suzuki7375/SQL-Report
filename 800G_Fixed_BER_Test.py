@@ -553,11 +553,21 @@ def load_output_workbook(base_dir: str) -> Workbook:
     return workbook
 
 
+def _find_last_data_row(ws) -> int:
+    for row_idx in range(ws.max_row, 0, -1):
+        if any(cell.value is not None for cell in ws[row_idx]):
+            return row_idx
+    return 0
+
+
 def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in workbook.sheetnames:
-        del workbook[sheet_name]
-    ws = workbook.create_sheet(title=sheet_name)
-    for row in dataframe_to_rows(df, index=False, header=True):
+        ws = workbook[sheet_name]
+    else:
+        ws = workbook.create_sheet(title=sheet_name)
+    last_row = _find_last_data_row(ws)
+    include_header = last_row == 0
+    for row in dataframe_to_rows(df, index=False, header=include_header):
         ws.append(row)
 
 
@@ -758,7 +768,7 @@ def main():
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
                     sheet_df = df.head(0).drop(columns=["_category"])
-            write_dataframe_to_sheet(workbook, category, sheet_df)
+                write_dataframe_to_sheet(workbook, category, sheet_df)
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
             populate_data_analysis_sheet(workbook, metrics, failed_devices, failed_components)
