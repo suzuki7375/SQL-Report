@@ -106,6 +106,60 @@ def export_report_dataframe(module, start_date: str, end_date: str) -> pd.DataFr
     return module.apply_header(df)
 
 
+def resolve_equipment_warning(sheet_prefix: str) -> str:
+    if sheet_prefix == "800G_TRX":
+        return "⚠️ TRX 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
+    if sheet_prefix == "800G_Fixed_BER":
+        return "⚠️ 3T BER 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
+    if sheet_prefix == "BER_Symbol_Error":
+        return "⚠️ BER 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
+    return "⚠️ 查不到 TESTNUMBER 欄位，Equipment 會留空"
+
+
+def fetch_equipment_map(module, df: pd.DataFrame, base_dir: str, sheet_prefix: str) -> dict[str, str]:
+    if not hasattr(module, "fetch_master_equipment_map"):
+        return {}
+    testnumber_finder = getattr(module, "find_testnumber_column", None)
+    if not callable(testnumber_finder):
+        return {}
+    testnumber_column = testnumber_finder(list(df.columns))
+    if not testnumber_column:
+        print(resolve_equipment_warning(sheet_prefix))
+        return {}
+    master_sql_file = getattr(module, "MASTER_SQL_FILE", "MASTER.sql")
+    master_sql_path = os.path.join(base_dir, master_sql_file)
+    if not os.path.exists(master_sql_path):
+        print("⚠️ 找不到 MASTER.sql，Equipment 會留空")
+        return {}
+    load_sql = getattr(module, "load_sql", None)
+    if callable(load_sql):
+        master_sql = load_sql(master_sql_path)
+    else:
+        with open(master_sql_path, "r", encoding="utf-8") as file:
+            master_sql = file.read()
+    testnumbers = (
+        df[testnumber_column]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    if not testnumbers:
+        return {}
+    with pyodbc.connect(module.conn_str_with_db(module.DATABASE), timeout=30) as conn:
+        return module.fetch_master_equipment_map(conn, master_sql, testnumbers)
+
+
+def should_add_equipment(sheet_prefix: str, category: str) -> bool:
+    if sheet_prefix == "800G_TRX":
+        return category != "其他"
+    if sheet_prefix == "800G_Fixed_BER":
+        return category == "3T_BER"
+    if sheet_prefix == "BER_Symbol_Error":
+        return category == "TC_BER"
+    return False
+
+
 def build_report(
     module,
     sheet_prefix: str,
@@ -114,6 +168,7 @@ def build_report(
     workbook: Workbook,
     start_date: str,
     end_date: str,
+    base_dir: str,
 ) -> dict[str, object]:
     print(f"\n🚀 開始整合：{sheet_prefix}")
     t0 = time.time()
@@ -125,15 +180,20 @@ def build_report(
         raise KeyError(f"查無欄位 {module.CH_NUMBER_HEADER}")
 
     df["_category"] = category_builder(df, module)
+    equipment_map = fetch_equipment_map(module, df, base_dir, sheet_prefix)
     df = module.apply_error_codes(df)
     metrics = module.build_data_analysis_metrics(df)
     failed_devices = module.build_failed_devices(df)
+    if equipment_map and hasattr(module, "add_equipment_column"):
+        failed_devices = module.add_equipment_column(failed_devices, equipment_map)
     failed_components = module.build_failed_component_records(df)
 
     for category in categories:
         sheet_df = df[df["_category"] == category].drop(columns=["_category"])
         if sheet_df.empty:
             sheet_df = df.head(0).drop(columns=["_category"])
+        if equipment_map and hasattr(module, "add_equipment_column") and should_add_equipment(sheet_prefix, category):
+            sheet_df = module.add_equipment_column(sheet_df, equipment_map)
         module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} {category}", sheet_df)
 
     module.write_dataframe_to_sheet(workbook, f"{sheet_prefix} Failed Device", failed_devices)
@@ -296,6 +356,7 @@ def main() -> None:
                 workbook,
                 start_date,
                 end_date,
+                base_dir,
             )
             report_results[report["sheet_prefix"]] = result
 
