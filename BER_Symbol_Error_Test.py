@@ -46,41 +46,6 @@ STATION_ORDER = [
     "ATS",
     "Switch",
 ]
-THREE_T_BER_ITEMS = [
-    "1_Pretest",
-    "2_Pretest",
-    "3_Pretest",
-    "4_Pretest",
-    "5_Pretest",
-    "6_Pretest",
-    "7_Pretest",
-    "8_Pretest",
-    "1_RT",
-    "2_RT",
-    "3_RT",
-    "4_RT",
-    "5_RT",
-    "6_RT",
-    "7_RT",
-    "8_RT",
-    "1_LT",
-    "2_LT",
-    "3_LT",
-    "4_LT",
-    "5_LT",
-    "6_LT",
-    "7_LT",
-    "8_LT",
-    "1_HT",
-    "2_HT",
-    "3_HT",
-    "4_HT",
-    "5_HT",
-    "6_HT",
-    "7_HT",
-    "8_HT",
-]
-THREE_T_BER_ITEM_SET = {item.lower() for item in THREE_T_BER_ITEMS}
 
 
 def parse_args() -> argparse.Namespace:
@@ -167,8 +132,6 @@ def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
 
 def classify_ch_number(value: str) -> str:
     text = str(value) if value is not None else ""
-    if is_three_t_ber_channel(text):
-        return "3T_BER"
     if is_tc_ber_channel(text):
         return "TC_BER"
     if "ATS" in text:
@@ -224,18 +187,6 @@ def find_station_column(columns: list[str]) -> str | None:
     return find_column(columns, ["station", "teststation", "test_station"])
 
 
-def find_test_item_column(columns: list[str]) -> str | None:
-    return find_column(
-        columns,
-        [
-            TEST_ITEM_HEADER.lower(),
-            "testitem",
-            "test_item",
-            "test item",
-        ],
-    )
-
-
 def find_result_column(columns: list[str]) -> str | None:
     return find_column(
         columns,
@@ -258,13 +209,9 @@ def find_ch_pass_fail_columns(columns: list[str]) -> list[str]:
 def normalize_station(text: str) -> str | None:
     if not text:
         return None
-    upper = text.upper().strip()
-    if upper in {"TC", "TCBER", "TC_BER"} or upper.startswith(("TC_", "TC-")):
+    upper = text.upper()
+    if is_tc_ber_channel(text):
         return "TC BER"
-    if upper in {"3T", "3TBER", "3T_BER"} or upper.startswith(("3T_", "3T-")):
-        return "3T BER"
-    if is_three_t_ber_channel(text):
-        return "3T BER"
     if "DDMI" in upper:
         return "DDMI"
     if "3T" in upper and "BER" in upper:
@@ -286,33 +233,14 @@ def normalize_station(text: str) -> str | None:
     return None
 
 
-def determine_station(
-    row: pd.Series,
-    station_column: str | None,
-    test_item_column: str | None,
-) -> str | None:
-    for column in (station_column, test_item_column):
-        if not column:
-            continue
-        value = row.get(column)
+def determine_station(row: pd.Series, station_column: str | None) -> str | None:
+    if station_column:
+        value = row.get(station_column)
         station = normalize_station(str(value)) if value is not None else None
         if station:
             return station
     value = row.get(CH_NUMBER_HEADER)
     return normalize_station(str(value)) if value is not None else None
-
-
-def classify_category(
-    row: pd.Series,
-    station_column: str | None,
-    test_item_column: str | None,
-) -> str:
-    station = determine_station(row, station_column, test_item_column)
-    if station == "3T BER":
-        return "3T_BER"
-    if station == "TC BER":
-        return "TC_BER"
-    return "其他"
 
 
 def is_pass(value: object) -> bool:
@@ -340,11 +268,6 @@ def normalize_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
-
-
-def is_three_t_ber_channel(value: object) -> bool:
-    text = normalize_text(value).lower()
-    return text in THREE_T_BER_ITEM_SET
 
 
 def is_tc_ber_channel(value: object) -> bool:
@@ -381,17 +304,54 @@ def extract_error_code(value: object) -> str:
     return prefix.split(" ", 1)[0].strip()
 
 
+def build_component_error_codes(df: pd.DataFrame) -> dict[str, str]:
+    component_column = find_component_column(list(df.columns))
+    failure_code_column = find_failure_code_column(list(df.columns))
+    if not failure_code_column:
+        print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
+        return {}
+    ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Error code 將為空白")
+        return {}
+
+    target_categories = {"TC_BER"}
+    if "_category" in df.columns:
+        source_df = df[df["_category"].isin(target_categories)]
+    else:
+        source_df = df
+
+    sort_columns = determine_sort_columns(source_df)
+    error_codes: dict[str, str] = {}
+    for component_id, group in source_df.groupby(component_column):
+        if sort_columns:
+            group = group.sort_values(sort_columns)
+        selected_code = ""
+        for _, row in group.iterrows():
+            if not any(
+                not is_pass(row.get(column))
+                for column in ch_pass_fail_columns
+            ):
+                continue
+            failure_value = row.get(failure_code_column)
+            if not has_value(failure_value):
+                continue
+            selected_code = extract_error_code(failure_value)
+            if selected_code:
+                break
+        if selected_code:
+            error_codes[component_id] = selected_code
+    return error_codes
+
+
 def apply_error_codes(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         df[ERROR_CODE_HEADER] = ""
         return df
+    component_column = find_component_column(list(df.columns))
+    error_code_map = build_component_error_codes(df)
     df = df.copy()
-    failure_code_column = find_failure_code_column(list(df.columns))
-    if not failure_code_column:
-        print("⚠️ 找不到 FailureCodeID 欄位，Error code 將為空白")
-        df[ERROR_CODE_HEADER] = ""
-        return df
-    df[ERROR_CODE_HEADER] = df[failure_code_column].apply(extract_error_code)
+    df[ERROR_CODE_HEADER] = df[component_column].map(error_code_map).fillna("")
     return df
 
 
@@ -399,26 +359,22 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
     component_column = find_component_column(list(df.columns))
     result_column = find_result_column(list(df.columns))
     station_column = find_station_column(list(df.columns))
-    test_item_column = find_test_item_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
     df = df.copy()
-    df["_station"] = df.apply(
-        lambda row: determine_station(row, station_column, test_item_column),
-        axis=1,
-    )
+    df["_station"] = df.apply(lambda row: determine_station(row, station_column), axis=1)
     df = df[df["_station"].isin(STATION_ORDER)]
 
     if not result_column:
         print("⚠️ 找不到結果欄位，良率將以 0 計算")
     if not ch_pass_fail_columns:
-        print("⚠️ 找不到 CH_Pass_Fail 欄位，3T BER 良率將以 0 計算")
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，TC BER 良率將以 0 計算")
 
     sort_columns = determine_sort_columns(df)
     metrics: dict[str, dict[str, float]] = {}
     for station in STATION_ORDER:
         station_df = df[df["_station"] == station]
-        if station == "3T BER":
+        if station in {"TC BER", "3T BER"}:
             expected_count = 32
         elif station in {"DDMI", "RT", "LT", "HT"}:
             expected_count = 8
@@ -434,7 +390,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
             if not tests:
                 continue
             fpy_input += 1
-            if station == "3T BER":
+            if station == "TC BER":
                 if ch_pass_fail_columns and all(
                     is_pass(value)
                     for column in ch_pass_fail_columns
@@ -446,7 +402,7 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
                     fpy_output += 1
             if len(tests) > 1:
                 retest_input += len(tests) - 1
-                if station == "3T BER":
+                if station == "TC BER":
                     if ch_pass_fail_columns:
                         retest_output += sum(
                             1
@@ -479,10 +435,9 @@ def build_data_analysis_metrics(df: pd.DataFrame) -> dict[str, dict[str, float]]
 def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
     component_column = find_component_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
-    result_column = find_result_column(list(df.columns))
 
-    if not ch_pass_fail_columns and not result_column:
-        print("⚠️ 找不到 CH_Pass_Fail 欄位或結果欄位，Failed Device sheet 將為空")
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Failed Device sheet 將為空")
         return df.head(0).drop(columns=["_category"], errors="ignore")
 
     sort_columns = determine_sort_columns(df)
@@ -496,16 +451,11 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
         for _, group in category_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
-                failed = False
-                if ch_pass_fail_columns:
-                    failed = any(
-                        not is_pass(value)
-                        for column in ch_pass_fail_columns
-                        for value in test_df[column]
-                    )
-                elif result_column:
-                    failed = any(not is_pass(val) for val in test_df[result_column])
-                if failed:
+                if any(
+                    not is_pass(value)
+                    for column in ch_pass_fail_columns
+                    for value in test_df[column]
+                ):
                     failed_tests.append(test_df)
 
     if failed_tests:
@@ -521,65 +471,38 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_failed_component_records(df: pd.DataFrame) -> pd.DataFrame:
     component_column = find_component_column(list(df.columns))
-    station_column = find_station_column(list(df.columns))
-    test_item_column = find_test_item_column(list(df.columns))
-    result_column = find_result_column(list(df.columns))
     ch_pass_fail_columns = find_ch_pass_fail_columns(list(df.columns))
 
-    if not ch_pass_fail_columns and not result_column:
-        print("⚠️ 找不到結果欄位或 CH_Pass_Fail 欄位，Pareto 統計將為空")
+    if not ch_pass_fail_columns:
+        print("⚠️ 找不到 CH_Pass_Fail 欄位，Pareto 統計將為空")
         return pd.DataFrame(columns=["category", "component_id", "error_code"])
 
     sort_columns = determine_sort_columns(df)
     records: list[dict[str, str]] = []
 
-    df = df.copy()
-    df["_station"] = df.apply(
-        lambda row: determine_station(row, station_column, test_item_column),
-        axis=1,
-    )
-    df = df[df["_station"].isin(STATION_ORDER)]
-
-    for station in STATION_ORDER:
-        station_df = df[df["_station"] == station]
-        if station_df.empty:
+    for category in ["TC_BER"]:
+        category_df = df[df["_category"] == category]
+        if category_df.empty:
             continue
-        if station == "3T BER":
-            expected_count = 32
-        elif station in {"DDMI", "RT", "LT", "HT"}:
-            expected_count = 8
-        else:
-            expected_count = 24
-        for component_id, group in station_df.groupby(component_column):
+        expected_count = 32
+        for component_id, group in category_df.groupby(component_column):
             tests = split_into_tests(group, expected_count, sort_columns)
             for test_df in tests:
-                if station == "3T BER":
-                    if not ch_pass_fail_columns:
-                        continue
-                    failed = any(
-                        not is_pass(value)
-                        for column in ch_pass_fail_columns
-                        for value in test_df[column]
+                if any(
+                    not is_pass(value)
+                    for column in ch_pass_fail_columns
+                    for value in test_df[column]
+                ):
+                    error_code = ""
+                    if ERROR_CODE_HEADER in test_df.columns:
+                        error_code = normalize_text(test_df[ERROR_CODE_HEADER].iloc[0])
+                    records.append(
+                        {
+                            "category": category,
+                            "component_id": str(component_id),
+                            "error_code": error_code,
+                        }
                     )
-                else:
-                    if not result_column:
-                        continue
-                    failed = any(not is_pass(val) for val in test_df[result_column])
-                if not failed:
-                    continue
-                error_code = ""
-                if ERROR_CODE_HEADER in test_df.columns:
-                    for value in test_df[ERROR_CODE_HEADER]:
-                        error_code = normalize_text(value)
-                        if error_code:
-                            break
-                records.append(
-                    {
-                        "category": station,
-                        "component_id": str(component_id),
-                        "error_code": error_code,
-                    }
-                )
 
     return pd.DataFrame(records, columns=["category", "component_id", "error_code"])
 
@@ -704,59 +627,53 @@ def populate_data_analysis_sheet(
         workbook.create_sheet(DATA_ANALYSIS_SHEET)
     ws = workbook[DATA_ANALYSIS_SHEET]
 
-    def find_row_by_keywords(keywords: list[str]) -> int | None:
-        for row in range(1, ws.max_row + 1):
-            value = ws.cell(row=row, column=1).value
-            if not value:
-                continue
-            text = str(value).upper()
-            if all(keyword.upper() in text for keyword in keywords):
-                return row
-        return None
+    fpy_row_map = {
+        "DDMI": 3,
+        "RT": 4,
+        "LT": 5,
+        "HT": 6,
+        "Burn In": 7,
+        "3T BER": 8,
+        "TC BER": 9,
+        "ATS": 10,
+        "Switch": 11,
+    }
+    retest_row_map = {
+        "DDMI": 16,
+        "RT": 17,
+        "LT": 18,
+        "HT": 19,
+        "Burn In": 20,
+        "3T BER": 21,
+        "TC BER": 22,
+        "ATS": 23,
+        "Switch": 24,
+    }
 
-    def collect_station_rows(start_row: int, end_row: int) -> dict[str, int]:
-        station_rows: dict[str, int] = {}
-        for row in range(start_row, end_row + 1):
-            value = ws.cell(row=row, column=1).value
-            if not value:
-                continue
-            text = str(value).upper()
-            for station in STATION_ORDER:
-                if station in station_rows:
-                    continue
-                if station.upper().replace(" ", "") in text.replace(" ", ""):
-                    station_rows[station] = row
-        return station_rows
+    for station, row in fpy_row_map.items():
+        data = metrics.get(station, {})
+        ws[f"B{row}"] = data.get("fpy_input", 0)
+        ws[f"C{row}"] = data.get("fpy_output", 0)
+        ws[f"D{row}"] = data.get("fpy_rate", 0)
 
-    fpy_header_row = find_row_by_keywords(["FPY"])
-    retest_header_row = find_row_by_keywords(["RE-TEST"])
-    pareto_header_row = find_row_by_keywords(["PARETO"])
+    for station, row in retest_row_map.items():
+        data = metrics.get(station, {})
+        ws[f"B{row}"] = data.get("retest_input", 0)
+        ws[f"C{row}"] = data.get("retest_output", 0)
+        ws[f"D{row}"] = data.get("retest_rate", 0)
 
-    if fpy_header_row:
-        fpy_end_row = (retest_header_row or ws.max_row) - 1
-        fpy_rows = collect_station_rows(fpy_header_row + 1, fpy_end_row)
-        for station, row in fpy_rows.items():
-            data = metrics.get(station, {})
-            ws[f"B{row}"] = data.get("fpy_input", 0)
-            ws[f"C{row}"] = data.get("fpy_output", 0)
-            ws[f"D{row}"] = data.get("fpy_rate", 0)
+    pareto_configs = [
+        ("DDMI", 28, 41, "components"),
+        ("RT", 43, 56, "components"),
+        ("LT", 58, 71, "components"),
+        ("HT", 73, 86, "components"),
+        ("ATS", 88, 100, "components"),
+        ("TC BER", 103, 115, "failed_devices"),
+    ]
 
-    if retest_header_row:
-        retest_end_row = (pareto_header_row or ws.max_row) - 1
-        retest_rows = collect_station_rows(retest_header_row + 1, retest_end_row)
-        for station, row in retest_rows.items():
-            data = metrics.get(station, {})
-            ws[f"B{row}"] = data.get("retest_input", 0)
-            ws[f"C{row}"] = data.get("retest_output", 0)
-            ws[f"D{row}"] = data.get("retest_rate", 0)
-
-    for station in STATION_ORDER:
-        keywords = [station, "PARETO"]
-        start_row = find_row_by_keywords(keywords)
-        if not start_row:
-            continue
+    for station, start_row, clear_until_row, source in pareto_configs:
         input_total = metrics.get(station, {}).get("fpy_input", 0)
-        if station == "3T BER":
+        if source == "failed_devices":
             pareto_table = build_failed_device_pareto_table(failed_devices, input_total)
         else:
             pareto_table = build_pareto_table(failed_components, station, input_total)
@@ -764,7 +681,7 @@ def populate_data_analysis_sheet(
             ws,
             start_row=start_row,
             table=pareto_table,
-            clear_until_row=start_row + PARETO_LIMIT,
+            clear_until_row=clear_until_row,
         )
 
 
@@ -805,23 +722,14 @@ def main():
                 raise KeyError(f"查無欄位 {CH_NUMBER_HEADER}")
 
             categories = ["TC_BER", "其他"]
-            station_column = find_station_column(list(df.columns))
-            test_item_column = find_test_item_column(list(df.columns))
-            df["_category"] = df.apply(
-                lambda row: classify_category(row, station_column, test_item_column),
-                axis=1,
-            )
+            df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
             metrics = build_data_analysis_metrics(df)
             failed_devices = build_failed_devices(df)
             failed_components = build_failed_component_records(df)
             for category in categories:
-                if category == "TC_BER":
-                    sheet_df = df[df["_category"].isin(["3T_BER", "TC_BER"])]
-                else:
-                    sheet_df = df[df["_category"] == category]
-                sheet_df = sheet_df.drop(columns=["_category"])
+                sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
                     sheet_df = df.head(0).drop(columns=["_category"])
                 write_dataframe_to_sheet(workbook, category, sheet_df)
