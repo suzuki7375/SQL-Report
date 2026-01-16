@@ -241,25 +241,6 @@ def build_ui() -> tk.Tk:
     end_picker = DatePicker(date_frame, today)
     end_picker.pack(side="left", padx=(8, 0))
 
-    time_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
-    time_frame.pack(fill="x", pady=(0, 12))
-
-    ttk.Label(time_frame, text="時間", style="Title.TLabel").pack(side="left")
-    ttk.Label(time_frame, text="(HHMM 或 TESTNUMBER，可空白)", style="Sub.TLabel").pack(
-        side="left",
-        padx=(8, 12),
-    )
-
-    start_time_var = tk.StringVar()
-    start_time_entry = ttk.Entry(time_frame, textvariable=start_time_var, width=18)
-    start_time_entry.pack(side="left", padx=(0, 8))
-
-    ttk.Label(time_frame, text="~", style="Title.TLabel").pack(side="left")
-
-    end_time_var = tk.StringVar()
-    end_time_entry = ttk.Entry(time_frame, textvariable=end_time_var, width=18)
-    end_time_entry.pack(side="left", padx=(8, 0))
-
     status_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     status_frame.pack(fill="x")
 
@@ -306,12 +287,6 @@ def build_ui() -> tk.Tk:
             return
         base_dir = get_base_dir()
         args = ["--start-date", start_picker.value, "--end-date", end_picker.value]
-        start_time_value = start_time_var.get().strip()
-        end_time_value = end_time_var.get().strip()
-        if start_time_value:
-            args.extend(["--start-time", start_time_value])
-        if end_time_value:
-            args.extend(["--end-time", end_time_value])
         if is_frozen():
             running_process = subprocess.Popen(
                 [sys.executable, "--run-script", script_name, *args],
