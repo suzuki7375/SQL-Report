@@ -227,6 +227,17 @@ def build_ui() -> tk.Tk:
     content_frame = ttk.Frame(main_frame, style="Panel.TFrame", padding=16)
     content_frame.pack(fill="both", expand=True)
 
+    output_dir_var = tk.StringVar()
+
+    def default_output_dir() -> str:
+        home_dir = os.path.expanduser("~")
+        desktop_dir = os.path.join(home_dir, "Desktop")
+        if os.path.isdir(desktop_dir):
+            return desktop_dir
+        return home_dir
+
+    output_dir_var.set(default_output_dir())
+
     date_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     date_frame.pack(fill="x", pady=(0, 12))
 
@@ -239,6 +250,18 @@ def build_ui() -> tk.Tk:
     ttk.Label(date_frame, text="~", style="Title.TLabel").pack(side="left")
     end_picker = DatePicker(date_frame, today)
     end_picker.pack(side="left", padx=(8, 0))
+
+    output_dir_label = ttk.Label(date_frame, text="輸出資料夾", style="Title.TLabel")
+    output_dir_label.pack(side="left", padx=(16, 6))
+    output_dir_entry = ttk.Entry(date_frame, textvariable=output_dir_var, width=28, state="readonly")
+    output_dir_entry.pack(side="left", padx=(0, 6))
+    output_dir_button = ttk.Button(
+        date_frame,
+        text="選擇",
+        style="Secondary.TButton",
+        command=select_output_dir,
+    )
+    output_dir_button.pack(side="left")
 
     status_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     status_frame.pack(fill="x")
@@ -326,20 +349,24 @@ def build_ui() -> tk.Tk:
         target_dir = output_dir or get_base_dir()
         return os.path.join(target_dir, filename)
 
-    def select_output_path() -> str | None:
-        default_path = build_combined_default_output_path()
-        initial_dir = os.path.dirname(default_path)
-        initial_file = os.path.basename(default_path)
-        return filedialog.asksaveasfilename(
-            title="選擇 Combined Report 輸出位置",
-            defaultextension=".xlsx",
-            initialdir=initial_dir,
-            initialfile=initial_file,
-            filetypes=[("Excel 檔案", "*.xlsx"), ("所有檔案", "*.*")],
-        )
+    def select_output_dir() -> None:
+        initial_dir = output_dir_var.get() or default_output_dir()
+        selected = filedialog.askdirectory(title="選擇輸出資料夾", initialdir=initial_dir)
+        if selected:
+            output_dir_var.set(selected)
 
-    def select_output_dir() -> str | None:
-        return filedialog.askdirectory(title="選擇每日 Combined Report 輸出資料夾")
+    def resolve_output_dir() -> str | None:
+        output_dir = output_dir_var.get().strip() or default_output_dir()
+        output_dir = os.path.expanduser(output_dir)
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.abspath(output_dir)
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError:
+            status_var.set("輸出資料夾無法建立，請重新選擇")
+            return None
+        output_dir_var.set(output_dir)
+        return output_dir
 
     def run_report(script_name: str, extra_args: list[str] | None = None) -> None:
         nonlocal running_process
@@ -364,20 +391,28 @@ def build_ui() -> tk.Tk:
         check_process()
 
     def run_trx_test() -> None:
-        run_report(SCRIPT_NAME)
+        output_dir = resolve_output_dir()
+        if not output_dir:
+            return
+        run_report(SCRIPT_NAME, ["--output-dir", output_dir])
 
     def run_fixed_ber_test() -> None:
-        run_report(FIXED_BER_SCRIPT_NAME)
+        output_dir = resolve_output_dir()
+        if not output_dir:
+            return
+        run_report(FIXED_BER_SCRIPT_NAME, ["--output-dir", output_dir])
 
     def run_ber_symbol_error_test() -> None:
-        run_report(BER_SYMBOL_ERROR_SCRIPT_NAME)
+        output_dir = resolve_output_dir()
+        if not output_dir:
+            return
+        run_report(BER_SYMBOL_ERROR_SCRIPT_NAME, ["--output-dir", output_dir])
 
     def run_combined_report() -> None:
-        output_path = select_output_path()
-        if not output_path:
-            status_var.set("已取消輸出")
+        output_dir = resolve_output_dir()
+        if not output_dir:
             return
-        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_dir])
 
     def cancel_schedule() -> None:
         nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
@@ -411,20 +446,11 @@ def build_ui() -> tk.Tk:
             status_var.set("查詢中，請稍候…")
             return
 
-        if daily_schedule_var.get():
-            output_dir = select_output_dir()
-            if not output_dir:
-                status_var.set("已取消排程")
-                return
-            scheduled_output_dir = output_dir
-            scheduled_output_path = build_combined_default_output_path(output_dir)
-        else:
-            output_path = select_output_path()
-            if not output_path:
-                status_var.set("已取消排程")
-                return
-            scheduled_output_path = output_path
-            scheduled_output_dir = None
+        output_dir = resolve_output_dir()
+        if not output_dir:
+            return
+        scheduled_output_dir = output_dir
+        scheduled_output_path = build_combined_default_output_path(output_dir)
 
         try:
             schedule_time = datetime.datetime.strptime(time_var.get().strip(), "%H:%M").time()
