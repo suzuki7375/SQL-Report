@@ -270,6 +270,7 @@ def _measure_cell_length(value: object) -> int:
 def format_equipment_status_sheet(ws) -> None:
     header_fill = PatternFill(fill_type="solid", fgColor="BDD7EE")
     header_attention_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+    yield_rate_header_fill = PatternFill(fill_type="solid", fgColor="FF0000")
     yield_green_fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
     yield_orange_fill = PatternFill(fill_type="solid", fgColor="FCE4D6")
     yield_red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
@@ -279,9 +280,16 @@ def format_equipment_status_sheet(ws) -> None:
         top=Side(style="thin"),
         bottom=Side(style="thin"),
     )
+    red_border = Border(
+        left=Side(style="thin", color="FF0000"),
+        right=Side(style="thin", color="FF0000"),
+        top=Side(style="thin", color="FF0000"),
+        bottom=Side(style="thin", color="FF0000"),
+    )
     base_font = Font(name="Calibri", size=10)
     header_font = Font(name="Calibri", size=10, bold=True)
     header_attention_font = Font(name="Calibri", size=10, bold=True, color="9C0006")
+    yield_rate_header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     for row in ws.iter_rows():
@@ -302,8 +310,8 @@ def format_equipment_status_sheet(ws) -> None:
 
     if yield_rate_col:
         header_cell = ws.cell(row=1, column=yield_rate_col)
-        header_cell.fill = header_attention_fill
-        header_cell.font = header_attention_font
+        header_cell.fill = yield_rate_header_fill
+        header_cell.font = yield_rate_header_font
         for row_idx in range(2, ws.max_row + 1):
             cell = ws.cell(row=row_idx, column=yield_rate_col)
             cell.number_format = "0.0%"
@@ -331,21 +339,18 @@ def format_equipment_status_sheet(ws) -> None:
         if cell.value not in known_columns
     ]
     if error_code_columns:
-        max_column_idx = None
-        max_total = -1
-        for column_idx, _header in error_code_columns:
-            total = 0
-            for row_idx in range(2, ws.max_row + 1):
+        for row_idx in range(2, ws.max_row + 1):
+            numeric_values = []
+            for column_idx, _header in error_code_columns:
                 value = ws.cell(row=row_idx, column=column_idx).value
                 if isinstance(value, (int, float)):
-                    total += value
-            if total > max_total:
-                max_total = total
-                max_column_idx = column_idx
-        if max_column_idx:
-            max_header = ws.cell(row=1, column=max_column_idx)
-            max_header.fill = header_attention_fill
-            max_header.font = header_attention_font
+                    numeric_values.append((column_idx, value))
+            if not numeric_values:
+                continue
+            max_value = max(value for _column_idx, value in numeric_values)
+            for column_idx, value in numeric_values:
+                if value == max_value:
+                    ws.cell(row=row_idx, column=column_idx).border = red_border
 
     for column_cells in ws.columns:
         column_letter = column_cells[0].column_letter
