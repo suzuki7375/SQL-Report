@@ -168,7 +168,7 @@ class DatePicker(ttk.Frame):
 def build_ui() -> tk.Tk:
     root = tk.Tk()
     root.title("800G 2FR4 SQL DATA")
-    root.geometry("760x520")
+    root.geometry("980x700")
     root.configure(bg="#f7f7fb")
 
     style = ttk.Style(root)
