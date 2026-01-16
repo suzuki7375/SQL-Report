@@ -11,6 +11,7 @@ import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 OUTPUT_EXTENSION = ".xlsx"
@@ -18,6 +19,32 @@ FUNCTION_TEMPLATE = "Function.xlsx"
 DATA_ANALYSIS_SHEET = "Data Analysis"
 EQUIPMENT_STATUS_SHEET = "equiment status"
 ERROR_CODE_HEADER_DEFAULT = "Error code"
+STATION_NAME_HEADER = "STATION NAME"
+ERROR_CODE_CANONICAL_HEADER = "Error Code"
+STATION_NAME_MAP = {
+    "ATS": {
+        "T157100002205_1": "ATS1_L",
+        "T157100002205_2": "ATS1_R",
+        "T157100002022_1": "ATS2_L",
+        "T157100002022_2": "ATS2_R",
+        "T157100002072_1": "ATS3_L",
+        "T157100002072_2": "ATS3_R",
+        "T157100002201_1": "ATS4_L",
+        "T157100002201_2": "ATS4_R",
+        "T157100002402_1": "ATS5_L",
+        "T157100002402_2": "ATS5_R",
+        "T157100002535_1": "ATS6_L",
+        "T157100002535_2": "ATS6_R",
+        "T157100002533_1": "ATS7_L",
+        "T157100002533_2": "ATS7_R",
+        "T157100002329_1": "OQC_L",
+        "T157100002329_2": "OQC_R",
+    },
+    "RT": {
+        "T157100002534": "RT2",
+        "T157100002113": "RT1",
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -126,6 +153,14 @@ def find_location_column(columns: list[str]) -> str | None:
     return next((col for col in columns if col.lower() in candidates), None)
 
 
+def resolve_station_name(category: object, equipment: object) -> str:
+    category_key = str(category).strip()
+    equipment_key = str(equipment).strip()
+    if not category_key or not equipment_key:
+        return ""
+    return STATION_NAME_MAP.get(category_key, {}).get(equipment_key, "")
+
+
 def resolve_equipment_warning(sheet_prefix: str) -> str:
     if sheet_prefix == "800G_TRX":
         return "⚠️ TRX 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
@@ -193,6 +228,46 @@ def write_dataframe_to_sheet(workbook: Workbook, sheet_name: str, df: pd.DataFra
     safe_df = df.applymap(normalize_excel_value)
     for row in dataframe_to_rows(safe_df, index=False, header=True):
         ws.append(row)
+
+
+def _measure_cell_length(value: object) -> int:
+    if value is None:
+        return 0
+    text = str(value)
+    return max((len(line) for line in text.splitlines()), default=0)
+
+
+def format_equipment_status_sheet(ws) -> None:
+    header_fill = PatternFill(fill_type="solid", fgColor="BDD7EE")
+    border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.border = border
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    yield_rate_col = None
+    for idx, cell in enumerate(ws[1], start=1):
+        if cell.value == "Yield rate":
+            yield_rate_col = idx
+            break
+
+    if yield_rate_col:
+        for row_idx in range(2, ws.max_row + 1):
+            ws.cell(row=row_idx, column=yield_rate_col).number_format = "0.0%"
+
+    for column_cells in ws.columns:
+        column_letter = column_cells[0].column_letter
+        max_length = max((_measure_cell_length(cell.value) for cell in column_cells), default=0)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 60)
 
 
 def reorder_error_code_column(
@@ -303,6 +378,59 @@ def _compute_group_fpy(
     return rows
 
 
+def build_error_code_summary(report_results: dict[str, dict[str, object]]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    report_name_map = {
+        "800G_TRX": "800G_TRX_TEST",
+        "800G_Fixed_BER": "800G_Fixed_BER_Test",
+        "BER_Symbol_Error": "BER_Symbol_Error_Test",
+    }
+
+    for sheet_prefix, result in report_results.items():
+        failed_devices = result.get("failed_devices")
+        if failed_devices is None or failed_devices.empty:
+            continue
+        module = result["module"]
+        equipment_map = result.get("equipment_map", {})
+        df = failed_devices.copy()
+        if "Equipment" not in df.columns:
+            df = _add_equipment_column(df, module, equipment_map)
+        location_column = find_location_column(list(df.columns))
+        df = _add_location_column(df, location_column)
+        error_code_header = getattr(module, "ERROR_CODE_HEADER", ERROR_CODE_HEADER_DEFAULT)
+        if error_code_header not in df.columns:
+            continue
+        df[ERROR_CODE_CANONICAL_HEADER] = df[error_code_header].fillna("").astype(str).str.strip()
+        df = df[df[ERROR_CODE_CANONICAL_HEADER] != ""]
+        if df.empty:
+            continue
+        if "Category" not in df.columns:
+            df["Category"] = ""
+        df["Report"] = report_name_map.get(sheet_prefix, sheet_prefix)
+        frames.append(df[["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]])
+
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    counts = (
+        combined.groupby(
+            ["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER],
+            dropna=False,
+        )
+        .size()
+        .reset_index(name="count")
+    )
+    summary = counts.pivot_table(
+        index=["Report", "Category", "Equipment", "Location"],
+        columns=ERROR_CODE_CANONICAL_HEADER,
+        values="count",
+        fill_value=0,
+        aggfunc="sum",
+    ).reset_index()
+    return summary
+
+
 def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
@@ -321,7 +449,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
             if category_df.empty:
                 continue
             expected_count = 24 if category == "ATS" else 8
-            group_fields = ["Equipment"] if category in {"ATS", "DDMI"} else ["Equipment", "Location"]
+            group_fields = ["Equipment", "Location"]
             for row in _compute_group_fpy(category_df, group_fields, module, expected_count):
                 row.update(
                     {
@@ -331,7 +459,8 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                 )
                 if "Location" not in row:
                     row["Location"] = ""
-                row["Yield rate"] = row.pop("fpy_rate") * 100
+                row[STATION_NAME_HEADER] = resolve_station_name(row.get("Category", ""), row.get("Equipment", ""))
+                row["Yield rate"] = row.pop("fpy_rate")
                 rows.append(row)
 
     fixed_result = report_results.get("800G_Fixed_BER")
@@ -353,7 +482,8 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                         "Category": "3T_BER",
                     }
                 )
-                row["Yield rate"] = row.pop("fpy_rate") * 100
+                row[STATION_NAME_HEADER] = resolve_station_name(row.get("Category", ""), row.get("Equipment", ""))
+                row["Yield rate"] = row.pop("fpy_rate")
                 rows.append(row)
 
     symbol_result = report_results.get("BER_Symbol_Error")
@@ -375,20 +505,54 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                         "Category": "TC_BER",
                     }
                 )
-                row["Yield rate"] = row.pop("fpy_rate") * 100
+                row[STATION_NAME_HEADER] = resolve_station_name(row.get("Category", ""), row.get("Equipment", ""))
+                row["Yield rate"] = row.pop("fpy_rate")
                 rows.append(row)
 
     if not rows:
         return pd.DataFrame(
-            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "Yield rate"]
+            columns=[
+                "Report",
+                "Category",
+                "Equipment",
+                STATION_NAME_HEADER,
+                "Location",
+                "fpy_input",
+                "fpy_output",
+                "Yield rate",
+            ]
         )
 
     table = pd.DataFrame(rows)
-    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "Yield rate"]
+    error_code_summary = build_error_code_summary(report_results)
+    if not error_code_summary.empty:
+        table = table.merge(
+            error_code_summary,
+            on=["Report", "Category", "Equipment", "Location"],
+            how="left",
+        )
+
+    column_order = [
+        "Report",
+        "Category",
+        "Equipment",
+        STATION_NAME_HEADER,
+        "Location",
+        "fpy_input",
+        "fpy_output",
+        "Yield rate",
+    ]
     for column in column_order:
         if column not in table.columns:
             table[column] = ""
-    return table[column_order]
+    error_code_columns = [
+        column
+        for column in table.columns
+        if column not in column_order
+    ]
+    if error_code_columns:
+        table[error_code_columns] = table[error_code_columns].fillna(0).astype(int)
+    return table[column_order + error_code_columns]
 
 
 def build_report(
@@ -600,6 +764,7 @@ def main() -> None:
         populate_combined_data_analysis(workbook, report_results)
         equipment_status = build_equipment_status_table(report_results)
         write_dataframe_to_sheet(workbook, EQUIPMENT_STATUS_SHEET, equipment_status)
+        format_equipment_status_sheet(workbook[EQUIPMENT_STATUS_SHEET])
         move_sheet_after(workbook, EQUIPMENT_STATUS_SHEET, DATA_ANALYSIS_SHEET)
         hide_sheet(workbook, "Error Code")
         hide_sheet(workbook, "800G_TRX 其他")
