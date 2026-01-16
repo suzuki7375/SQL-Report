@@ -257,6 +257,15 @@ def build_ui() -> tk.Tk:
     schedule_controls = ttk.Frame(schedule_frame, style="Card.TFrame")
     schedule_controls.pack(fill="x", pady=(8, 0))
 
+    schedule_hint = ttk.Label(
+        schedule_frame,
+        text="提示：程式排程在休眠/睡眠時不會觸發，建議需要穩定排程時改用 Windows 工作排程器。",
+        style="Sub.TLabel",
+        wraplength=680,
+        justify="left",
+    )
+    schedule_hint.pack(anchor="w", pady=(6, 0))
+
     schedule_date_picker = DatePicker(schedule_controls, today)
     schedule_date_picker.pack(side="left", padx=(0, 8))
 
@@ -281,6 +290,8 @@ def build_ui() -> tk.Tk:
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
     scheduled_job_id: str | None = None
+    scheduled_output_path: str | None = None
+    scheduled_output_dir: str | None = None
 
     def set_loading(is_loading: bool) -> None:
         state = "disabled" if is_loading else "normal"
@@ -308,11 +319,12 @@ def build_ui() -> tk.Tk:
             return start_date
         return f"{start_date}_{end_date}"
 
-    def build_combined_default_output_path() -> str:
+    def build_combined_default_output_path(output_dir: str | None = None) -> str:
         base_name = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
         date_range = format_date_range(start_picker.value, end_picker.value)
         filename = f"{base_name}_{date_range}.xlsx"
-        return os.path.join(get_base_dir(), filename)
+        target_dir = output_dir or get_base_dir()
+        return os.path.join(target_dir, filename)
 
     def select_output_path() -> str | None:
         default_path = build_combined_default_output_path()
@@ -325,6 +337,9 @@ def build_ui() -> tk.Tk:
             initialfile=initial_file,
             filetypes=[("Excel 檔案", "*.xlsx"), ("所有檔案", "*.*")],
         )
+
+    def select_output_dir() -> str | None:
+        return filedialog.askdirectory(title="選擇每日 Combined Report 輸出資料夾")
 
     def run_report(script_name: str, extra_args: list[str] | None = None) -> None:
         nonlocal running_process
@@ -365,10 +380,12 @@ def build_ui() -> tk.Tk:
         run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
 
     def cancel_schedule() -> None:
-        nonlocal scheduled_job_id
+        nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
         if scheduled_job_id:
             root.after_cancel(scheduled_job_id)
             scheduled_job_id = None
+            scheduled_output_path = None
+            scheduled_output_dir = None
             status_var.set("已取消排程")
 
     def next_daily_run(schedule_time: datetime.time) -> datetime.datetime:
@@ -383,16 +400,31 @@ def build_ui() -> tk.Tk:
             candidate += datetime.timedelta(days=1)
         return candidate
 
+    def update_schedule_mode() -> None:
+        schedule_date_picker_state = "disabled" if daily_schedule_var.get() else "readonly"
+        for child in schedule_date_picker.winfo_children():
+            child.configure(state=schedule_date_picker_state)
+
     def schedule_combined_report() -> None:
-        nonlocal scheduled_job_id
+        nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
         if running_process is not None:
             status_var.set("查詢中，請稍候…")
             return
 
-        output_path = select_output_path()
-        if not output_path:
-            status_var.set("已取消排程")
-            return
+        if daily_schedule_var.get():
+            output_dir = select_output_dir()
+            if not output_dir:
+                status_var.set("已取消排程")
+                return
+            scheduled_output_dir = output_dir
+            scheduled_output_path = build_combined_default_output_path(output_dir)
+        else:
+            output_path = select_output_path()
+            if not output_path:
+                status_var.set("已取消排程")
+                return
+            scheduled_output_path = output_path
+            scheduled_output_dir = None
 
         try:
             schedule_time = datetime.datetime.strptime(time_var.get().strip(), "%H:%M").time()
@@ -414,9 +446,14 @@ def build_ui() -> tk.Tk:
 
         delay_ms = int((scheduled_at - datetime.datetime.now()).total_seconds() * 1000)
         def run_scheduled() -> None:
-            nonlocal scheduled_job_id
+            nonlocal scheduled_job_id, scheduled_output_path
             scheduled_job_id = None
-            run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+            if daily_schedule_var.get() and scheduled_output_dir:
+                scheduled_output_path = build_combined_default_output_path(scheduled_output_dir)
+            if not scheduled_output_path:
+                status_var.set("找不到排程輸出路徑")
+                return
+            run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", scheduled_output_path])
             if daily_schedule_var.get():
                 next_run = next_daily_run(schedule_time)
                 scheduled_job_id = root.after(
@@ -474,6 +511,8 @@ def build_ui() -> tk.Tk:
         command=cancel_schedule,
     )
     cancel_schedule_button.pack(side="left")
+    daily_checkbutton.configure(command=update_schedule_mode)
+    update_schedule_mode()
 
     combined_report_button = ttk.Button(
         buttons_frame,
