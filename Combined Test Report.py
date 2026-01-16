@@ -509,6 +509,7 @@ def populate_equipment_performance_section(
     start_row: int,
     section_title: str,
     group_with_location: bool = False,
+    sort_columns: list[str] | None = None,
 ) -> int:
     section_df = df[df["_category"].isin(categories)].copy()
     if section_df.empty:
@@ -546,15 +547,7 @@ def populate_equipment_performance_section(
     for item in items:
         section_df[item] = pd.to_numeric(section_df[item], errors="coerce")
 
-    group_fields = [STATION_NAME_HEADER, equipment_column]
-    if group_with_location:
-        group_fields.append("Location")
-
-    summary = (
-        section_df.groupby(group_fields, dropna=False)[items]
-        .mean()
-        .reset_index()
-    )
+    sort_columns = [col for col in (sort_columns or []) if col in section_df.columns]
 
     ws.cell(row=start_row, column=1, value=section_title)
     block_start_row = start_row + 1
@@ -562,7 +555,7 @@ def populate_equipment_performance_section(
     chart_height_rows = 15
 
     for station in station_names:
-        station_summary = summary[summary[STATION_NAME_HEADER] == station].copy()
+        station_summary = section_df[section_df[STATION_NAME_HEADER] == station].copy()
         if group_with_location:
             station_summary["Equipment Display"] = station_summary.apply(
                 lambda row: " ".join(
@@ -578,7 +571,8 @@ def populate_equipment_performance_section(
             display_column = equipment_column
             header_label = "Equipment"
 
-        station_summary = station_summary.sort_values(display_column)
+        sort_fields = [display_column, *sort_columns]
+        station_summary = station_summary.sort_values(sort_fields) if sort_fields else station_summary
         if station_summary.empty:
             station_summary = pd.DataFrame(
                 [{display_column: "", **{item: None for item in items}}]
@@ -1036,6 +1030,9 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
     df = _add_equipment_column(df, module, equipment_map)
     location_column = find_location_column(list(df.columns))
     df = _add_location_column(df, location_column)
+    sort_columns: list[str] = []
+    if hasattr(module, "determine_sort_columns"):
+        sort_columns = module.determine_sort_columns(df)
 
     if EQUIPMENT_PERFORMANCE_SHEET in workbook.sheetnames:
         workbook.remove(workbook[EQUIPMENT_PERFORMANCE_SHEET])
@@ -1050,6 +1047,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         start_row=next_row,
         section_title="800G_TRX DDMI",
         group_with_location=False,
+        sort_columns=sort_columns,
     )
     next_row = populate_equipment_performance_section(
         ws,
@@ -1059,6 +1057,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         start_row=next_row,
         section_title="800G_TRX ATS",
         group_with_location=False,
+        sort_columns=sort_columns,
     )
     populate_equipment_performance_section(
         ws,
@@ -1068,6 +1067,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         start_row=next_row,
         section_title="800G_TRX LT/HT/RT",
         group_with_location=True,
+        sort_columns=sort_columns,
     )
 
 
