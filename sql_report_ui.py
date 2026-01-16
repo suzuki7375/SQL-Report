@@ -249,7 +249,8 @@ def build_ui() -> tk.Tk:
 
     ttk.Label(date_frame, text="日期", style="Title.TLabel").pack(side="left")
 
-    today = datetime.date.today()
+    now = datetime.datetime.now()
+    today = now.date()
     start_picker = DatePicker(date_frame, today)
     start_picker.pack(side="left", padx=(12, 8))
 
@@ -295,10 +296,7 @@ def build_ui() -> tk.Tk:
     )
     schedule_hint.pack(anchor="w", pady=(6, 0))
 
-    schedule_date_picker = DatePicker(schedule_controls, today)
-    schedule_date_picker.pack(side="left", padx=(0, 8))
-
-    time_var = tk.StringVar(value=datetime.datetime.now().strftime("%H:%M"))
+    time_var = tk.StringVar(value=now.strftime("%H:%M"))
     time_entry = ttk.Entry(schedule_controls, textvariable=time_var, width=8)
     time_entry.pack(side="left", padx=(0, 8))
 
@@ -435,11 +433,6 @@ def build_ui() -> tk.Tk:
             candidate += datetime.timedelta(days=1)
         return candidate
 
-    def update_schedule_mode() -> None:
-        schedule_date_picker_state = "disabled" if daily_schedule_var.get() else "readonly"
-        for child in schedule_date_picker.winfo_children():
-            child.configure(state=schedule_date_picker_state)
-
     def schedule_combined_report() -> None:
         nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
         if running_process is not None:
@@ -461,7 +454,7 @@ def build_ui() -> tk.Tk:
         if daily_schedule_var.get():
             scheduled_at = next_daily_run(schedule_time)
         else:
-            schedule_date = datetime.date.fromisoformat(schedule_date_picker.value)
+            schedule_date = datetime.date.today()
             scheduled_at = datetime.datetime.combine(schedule_date, schedule_time)
             if scheduled_at <= datetime.datetime.now():
                 status_var.set("排程時間需晚於現在")
@@ -537,8 +530,6 @@ def build_ui() -> tk.Tk:
         command=cancel_schedule,
     )
     cancel_schedule_button.pack(side="left")
-    daily_checkbutton.configure(command=update_schedule_mode)
-    update_schedule_mode()
 
     combined_report_button = ttk.Button(
         buttons_frame,
