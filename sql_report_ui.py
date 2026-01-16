@@ -238,6 +238,12 @@ def build_ui() -> tk.Tk:
 
     output_dir_var.set(default_output_dir())
 
+    def select_output_dir() -> None:
+        initial_dir = output_dir_var.get() or default_output_dir()
+        selected = filedialog.askdirectory(title="選擇輸出資料夾", initialdir=initial_dir)
+        if selected:
+            output_dir_var.set(selected)
+
     date_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     date_frame.pack(fill="x", pady=(0, 12))
 
@@ -348,12 +354,6 @@ def build_ui() -> tk.Tk:
         filename = f"{base_name}_{date_range}.xlsx"
         target_dir = output_dir or get_base_dir()
         return os.path.join(target_dir, filename)
-
-    def select_output_dir() -> None:
-        initial_dir = output_dir_var.get() or default_output_dir()
-        selected = filedialog.askdirectory(title="選擇輸出資料夾", initialdir=initial_dir)
-        if selected:
-            output_dir_var.set(selected)
 
     def resolve_output_dir() -> str | None:
         output_dir = output_dir_var.get().strip() or default_output_dir()
