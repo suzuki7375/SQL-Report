@@ -44,6 +44,12 @@ STATION_NAME_MAP = {
         "T157100002534": "RT2",
         "T157100002113": "RT1",
     },
+    "DDMI": {
+        "T157100002101_1": "DDMI 1_L",
+        "T157100002101_2": "DDMI 1_R",
+        "T157100002316_1": "DDMI 2_L",
+        "T157100002316_2": "DDMI 2_R",
+    },
 }
 
 
@@ -239,18 +245,28 @@ def _measure_cell_length(value: object) -> int:
 
 def format_equipment_status_sheet(ws) -> None:
     header_fill = PatternFill(fill_type="solid", fgColor="BDD7EE")
+    header_attention_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+    yield_green_fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
+    yield_orange_fill = PatternFill(fill_type="solid", fgColor="FCE4D6")
+    yield_red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
     border = Border(
         left=Side(style="thin"),
         right=Side(style="thin"),
         top=Side(style="thin"),
         bottom=Side(style="thin"),
     )
-    header_font = Font(bold=True)
+    base_font = Font(name="Calibri", size=10)
+    header_font = Font(name="Calibri", size=10, bold=True)
+    header_attention_font = Font(name="Calibri", size=10, bold=True, color="9C0006")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.font = base_font
+            cell.border = border
 
     for cell in ws[1]:
         cell.fill = header_fill
-        cell.border = border
         cell.font = header_font
         cell.alignment = header_alignment
 
@@ -261,13 +277,56 @@ def format_equipment_status_sheet(ws) -> None:
             break
 
     if yield_rate_col:
+        header_cell = ws.cell(row=1, column=yield_rate_col)
+        header_cell.fill = header_attention_fill
+        header_cell.font = header_attention_font
         for row_idx in range(2, ws.max_row + 1):
-            ws.cell(row=row_idx, column=yield_rate_col).number_format = "0.0%"
+            cell = ws.cell(row=row_idx, column=yield_rate_col)
+            cell.number_format = "0.0%"
+            if isinstance(cell.value, (int, float)):
+                if cell.value >= 0.9:
+                    cell.fill = yield_green_fill
+                elif cell.value >= 0.7:
+                    cell.fill = yield_orange_fill
+                else:
+                    cell.fill = yield_red_fill
+
+    known_columns = {
+        "Report",
+        "Category",
+        "Equipment",
+        STATION_NAME_HEADER,
+        "Location",
+        "fpy_input",
+        "fpy_output",
+        "Yield rate",
+    }
+    error_code_columns = [
+        (idx, cell.value)
+        for idx, cell in enumerate(ws[1], start=1)
+        if cell.value not in known_columns
+    ]
+    if error_code_columns:
+        max_column_idx = None
+        max_total = -1
+        for column_idx, _header in error_code_columns:
+            total = 0
+            for row_idx in range(2, ws.max_row + 1):
+                value = ws.cell(row=row_idx, column=column_idx).value
+                if isinstance(value, (int, float)):
+                    total += value
+            if total > max_total:
+                max_total = total
+                max_column_idx = column_idx
+        if max_column_idx:
+            max_header = ws.cell(row=1, column=max_column_idx)
+            max_header.fill = header_attention_fill
+            max_header.font = header_attention_font
 
     for column_cells in ws.columns:
         column_letter = column_cells[0].column_letter
         max_length = max((_measure_cell_length(cell.value) for cell in column_cells), default=0)
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 60)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 8), 60)
 
 
 def reorder_error_code_column(
