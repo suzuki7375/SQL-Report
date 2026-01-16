@@ -533,16 +533,6 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
             how="left",
         )
 
-    report_order = ["800G_TRX_TEST", "800G_Fixed_BER_Test", "BER_Symbol_Error_Test"]
-    category_order = ["ATS", "DDMI", "RT", "LT", "HT", "3T_BER", "TC_BER"]
-    table["_report_order"] = pd.Categorical(table["Report"], categories=report_order, ordered=True)
-    table["_category_order"] = pd.Categorical(table["Category"], categories=category_order, ordered=True)
-    table = table.sort_values(
-        by=["_report_order", "_category_order", "Equipment", "Location"],
-        kind="stable",
-        na_position="last",
-    ).drop(columns=["_report_order", "_category_order"])
-
     column_order = [
         "Report",
         EQUIPMENT_STATUS_CATEGORY_HEADER,
