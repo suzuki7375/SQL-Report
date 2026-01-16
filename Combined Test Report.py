@@ -331,6 +331,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                 )
                 if "Location" not in row:
                     row["Location"] = ""
+                row["Yield rate"] = row.pop("fpy_rate") * 100
                 rows.append(row)
 
     fixed_result = report_results.get("800G_Fixed_BER")
@@ -352,6 +353,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                         "Category": "3T_BER",
                     }
                 )
+                row["Yield rate"] = row.pop("fpy_rate") * 100
                 rows.append(row)
 
     symbol_result = report_results.get("BER_Symbol_Error")
@@ -373,16 +375,16 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
                         "Category": "TC_BER",
                     }
                 )
+                row["Yield rate"] = row.pop("fpy_rate") * 100
                 rows.append(row)
 
     if not rows:
         return pd.DataFrame(
-            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "%"]
+            columns=["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "Yield rate"]
         )
 
     table = pd.DataFrame(rows)
-    table = table.rename(columns={"fpy_rate": "%"})
-    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "%"]
+    column_order = ["Report", "Category", "Equipment", "Location", "fpy_input", "fpy_output", "Yield rate"]
     for column in column_order:
         if column not in table.columns:
             table[column] = ""
