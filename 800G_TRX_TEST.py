@@ -11,6 +11,8 @@ import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.chart import LineChart, Reference
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 SERVER = "omddb"
@@ -43,6 +45,14 @@ FUNCTION_TEMPLATE = "Function.xlsx"
 ERROR_CODE_HEADER = "Error code"
 FAILURE_CODE_HEADER = "FailureCodeID"
 PARETO_COLUMNS = ["Error Code", "Fail Q'ty", "Failed Rate", "Cum%"]
+EQUIPMENT_PERFORMANCE_SHEET = "Equipment Performance"
+EQUIPMENT_PERFORMANCE_ITEMS = [
+    "Power(dBm)",
+    "Rxp_Slope",
+    "Txp_Slope",
+    "Vcc_Slope",
+]
+EQUIPMENT_PERFORMANCE_STATION_LIMIT = 4
 STATION_ORDER = [
     "DDMI",
     "RT",
@@ -317,7 +327,10 @@ def find_failure_code_column(columns: list[str]) -> str | None:
 
 
 def find_station_column(columns: list[str]) -> str | None:
-    return find_column(columns, ["station", "teststation", "test_station"])
+    return find_column(
+        columns,
+        ["station", "teststation", "test_station", "station_name", "station name", "stationname"],
+    )
 
 
 def find_result_column(columns: list[str]) -> str | None:
@@ -882,6 +895,140 @@ def populate_data_analysis_sheet(
         )
 
 
+def _normalize_column_key(value: str) -> str:
+    return value.replace(" ", "").lower()
+
+
+def _find_equipment_performance_column(columns: list[str], target: str) -> str | None:
+    target_key = _normalize_column_key(target)
+    for column in columns:
+        if _normalize_column_key(column) == target_key:
+            return column
+    return None
+
+
+def _build_station_name_order(series: pd.Series) -> list[str]:
+    station_names: list[str] = []
+    for value in series.dropna():
+        name = str(value).strip()
+        if not name or name in station_names:
+            continue
+        station_names.append(name)
+    return station_names
+
+
+def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFrame) -> None:
+    if ddmi_df.empty:
+        print("⚠️ DDMI sheet 無資料，Equipment Performance 將為空")
+        return
+
+    equipment_column = find_equipment_column(list(ddmi_df.columns))
+    if not equipment_column:
+        print("⚠️ 找不到 Equipment 欄位，Equipment Performance 將為空")
+        return
+
+    station_column = find_station_column(list(ddmi_df.columns))
+    if not station_column:
+        print("⚠️ 找不到 Station Name 欄位，Equipment Performance 將為空")
+        return
+
+    source_df = ddmi_df.copy()
+    rename_map: dict[str, str] = {}
+    for item in EQUIPMENT_PERFORMANCE_ITEMS:
+        matched = _find_equipment_performance_column(list(source_df.columns), item)
+        if matched:
+            rename_map[matched] = item
+        else:
+            source_df[item] = np.nan
+            print(f"⚠️ DDMI 找不到 {item} 欄位，圖表將為空")
+    if rename_map:
+        source_df = source_df.rename(columns=rename_map)
+
+    for item in EQUIPMENT_PERFORMANCE_ITEMS:
+        source_df[item] = pd.to_numeric(source_df[item], errors="coerce")
+
+    station_names = _build_station_name_order(source_df[station_column])
+    if not station_names:
+        print("⚠️ Station Name 無有效資料，Equipment Performance 將為空")
+        return
+    station_names = station_names[:EQUIPMENT_PERFORMANCE_STATION_LIMIT]
+
+    summary = (
+        source_df.groupby([station_column, equipment_column], dropna=False)[EQUIPMENT_PERFORMANCE_ITEMS]
+        .mean()
+        .reset_index()
+    )
+
+    if EQUIPMENT_PERFORMANCE_SHEET in workbook.sheetnames:
+        workbook.remove(workbook[EQUIPMENT_PERFORMANCE_SHEET])
+    ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
+
+    chart_columns = [8, 16, 24, 32]
+    block_start_row = 1
+    chart_height_rows = 15
+
+    for station in station_names:
+        station_summary = summary[summary[station_column] == station].copy()
+        station_summary = station_summary.sort_values(equipment_column)
+        if station_summary.empty:
+            station_summary = pd.DataFrame(
+                [{equipment_column: "", **{item: np.nan for item in EQUIPMENT_PERFORMANCE_ITEMS}}]
+            )
+
+        title_row = block_start_row
+        header_row = block_start_row + 1
+        data_row_start = block_start_row + 2
+
+        ws.cell(row=title_row, column=1, value=station)
+        ws.cell(row=header_row, column=1, value="Equipment")
+        for idx, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS, start=2):
+            ws.cell(row=header_row, column=idx, value=item)
+
+        equipment_index = station_summary.columns.get_loc(equipment_column)
+        item_indexes = {
+            item: station_summary.columns.get_loc(item)
+            for item in EQUIPMENT_PERFORMANCE_ITEMS
+        }
+
+        for row_offset, row in enumerate(station_summary.itertuples(index=False), start=0):
+            ws.cell(
+                row=data_row_start + row_offset,
+                column=1,
+                value=row[equipment_index],
+            )
+            for item_index, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS, start=2):
+                ws.cell(
+                    row=data_row_start + row_offset,
+                    column=item_index,
+                    value=row[item_indexes[item]],
+                )
+
+        data_row_end = data_row_start + len(station_summary) - 1
+        categories = Reference(ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+
+        for item_index, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS):
+            data_ref = Reference(
+                ws,
+                min_col=item_index + 2,
+                min_row=header_row,
+                max_row=data_row_end,
+            )
+            chart = LineChart()
+            chart.title = f"{station} {item}"
+            chart.y_axis.title = item
+            chart.x_axis.title = "Equipment"
+            chart.add_data(data_ref, titles_from_data=True)
+            chart.set_categories(categories)
+            chart.height = 7
+            chart.width = 14
+            anchor_col = get_column_letter(chart_columns[item_index])
+            ws.add_chart(chart, f"{anchor_col}{title_row}")
+
+        table_height = len(station_summary) + 2
+        block_height = max(table_height, chart_height_rows) + 3
+        block_start_row += block_height
+
+
 def main():
     args = parse_args()
     start_date = parse_date(args.start_date).isoformat()
@@ -974,6 +1121,10 @@ def main():
 
             write_dataframe_to_sheet(workbook, "Failed Device", failed_devices)
             populate_data_analysis_sheet(workbook, metrics, failed_components)
+            ddmi_df = df[df["_category"] == "DDMI"].drop(columns=["_category"])
+            if equipment_map:
+                ddmi_df = add_equipment_column(ddmi_df, equipment_map)
+            populate_equipment_performance_sheet(workbook, ddmi_df)
             workbook.save(out_path)
 
             print("📁 Excel 已輸出：", out_path)
