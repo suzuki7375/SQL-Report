@@ -96,6 +96,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
+    parser.add_argument("--output-dir", help="輸出資料夾")
     return parser.parse_args()
 
 
@@ -240,6 +241,15 @@ def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
     date_range = format_date_range(start_date, end_date)
     filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
     return os.path.join(base_dir, filename)
+
+
+def normalize_output_dir(base_dir: str, output_dir: str | None) -> str:
+    if not output_dir:
+        return base_dir
+    expanded_dir = os.path.expanduser(output_dir)
+    if not os.path.isabs(expanded_dir):
+        return os.path.join(base_dir, expanded_dir)
+    return expanded_dir
 
 
 def classify_ch_number(value: str) -> str:
@@ -922,7 +932,9 @@ def main():
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = build_output_path(base_dir, args.start_date, args.end_date)
+    output_dir = normalize_output_dir(base_dir, args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = build_output_path(output_dir, args.start_date, args.end_date)
 
     try:
         print(f"🚀 連線 DB：{DATABASE}")
