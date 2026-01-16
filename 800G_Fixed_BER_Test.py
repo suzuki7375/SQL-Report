@@ -252,6 +252,18 @@ def normalize_output_dir(base_dir: str, output_dir: str | None) -> str:
     return expanded_dir
 
 
+def ensure_unique_output_path(path: str) -> str:
+    if not os.path.exists(path):
+        return path
+    root, ext = os.path.splitext(path)
+    counter = 1
+    while True:
+        candidate = f"{root}_{counter}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
+
 def classify_ch_number(value: str) -> str:
     text = str(value) if value is not None else ""
     if is_three_t_ber_channel(text):
@@ -935,6 +947,7 @@ def main():
     output_dir = normalize_output_dir(base_dir, args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
     out_path = build_output_path(output_dir, args.start_date, args.end_date)
+    out_path = ensure_unique_output_path(out_path)
 
     try:
         print(f"🚀 連線 DB：{DATABASE}")

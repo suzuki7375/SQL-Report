@@ -10,8 +10,10 @@ import time
 import pandas as pd
 import pyodbc
 from openpyxl import Workbook, load_workbook
+from openpyxl.chart import LineChart, Reference
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 OUTPUT_EXTENSION = ".xlsx"
@@ -21,6 +23,23 @@ EQUIPMENT_STATUS_SHEET = "equiment status"
 ERROR_CODE_HEADER_DEFAULT = "Error code"
 STATION_NAME_HEADER = "STATION NAME"
 ERROR_CODE_CANONICAL_HEADER = "Error Code"
+EQUIPMENT_PERFORMANCE_SHEET = "Equipment Performance"
+EQUIPMENT_PERFORMANCE_DDMI_ITEMS = [
+    "Power(dBm)",
+    "Rxp_Slope",
+    "Txp_Slope",
+    "Vcc_Slope",
+]
+EQUIPMENT_PERFORMANCE_ATS_ITEMS = [
+    "dTxP",
+    "dRxP1",
+    "dVcc(%)",
+]
+EQUIPMENT_PERFORMANCE_TH_ITEMS = [
+    "dTxP",
+    "dRxP1",
+    "dVcc(%)",
+]
 STATION_NAME_MAP = {
     "ATS": {
         "T157100002205_1": "ATS1_L",
@@ -104,6 +123,18 @@ def normalize_output_path(
     return expanded_path
 
 
+def ensure_unique_output_path(path: str) -> str:
+    if not os.path.exists(path):
+        return path
+    root, ext = os.path.splitext(path)
+    counter = 1
+    while True:
+        candidate = f"{root}_{counter}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
+
 def load_module(module_path: str, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
@@ -183,12 +214,75 @@ def find_location_column(columns: list[str]) -> str | None:
     return next((col for col in columns if col.lower() in candidates), None)
 
 
+def find_equipment_column(columns: list[str]) -> str | None:
+    return next((col for col in columns if col.strip().lower() == "equipment"), None)
+
+
+def _normalize_column_key(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def find_station_name_column(columns: list[str]) -> str | None:
+    target_key = _normalize_column_key(STATION_NAME_HEADER)
+    for column in columns:
+        if _normalize_column_key(str(column)) == target_key:
+            return column
+    candidates = [
+        "station",
+        "teststation",
+        "test_station",
+        "station_name",
+        "station name",
+        "stationname",
+    ]
+    for column in columns:
+        if str(column).strip().lower() in candidates:
+            return column
+    return None
+
+
 def resolve_station_name(category: object, equipment: object) -> str:
     category_key = str(category).strip()
     equipment_key = str(equipment).strip()
     if not category_key or not equipment_key:
         return ""
     return STATION_NAME_MAP.get(category_key, {}).get(equipment_key, "")
+
+
+def build_station_name_series(
+    df: pd.DataFrame,
+    category_column: str,
+    equipment_column: str,
+) -> pd.Series:
+    station_column = find_station_name_column(list(df.columns))
+    if station_column and station_column in df.columns:
+        station_series = df[station_column].astype(str).str.strip()
+    else:
+        station_series = df.apply(
+            lambda row: resolve_station_name(row.get(category_column, ""), row.get(equipment_column, "")),
+            axis=1,
+        )
+    fallback = df[category_column].astype(str).str.strip()
+    station_series = station_series.fillna("").astype(str).str.strip()
+    return station_series.mask(station_series == "", fallback)
+
+
+def _find_equipment_performance_column(columns: list[str], target: str) -> str | None:
+    target_key = _normalize_column_key(target)
+    for column in columns:
+        if _normalize_column_key(str(column)) == target_key:
+            return column
+    return None
+
+
+def _build_station_name_order(series: pd.Series) -> list[str]:
+    station_names: list[str] = []
+    for value in series.dropna():
+        name = str(value).strip()
+        if not name or name in station_names:
+            continue
+        station_names.append(name)
+    return station_names
 
 
 def resolve_equipment_warning(sheet_prefix: str) -> str:
@@ -405,6 +499,139 @@ def _add_location_column(df: pd.DataFrame, location_column: str | None) -> pd.Da
     else:
         df["Location"] = ""
     return df
+
+
+def populate_equipment_performance_section(
+    ws,
+    df: pd.DataFrame,
+    categories: list[str],
+    items: list[str],
+    start_row: int,
+    section_title: str,
+    group_with_location: bool = False,
+) -> int:
+    section_df = df[df["_category"].isin(categories)].copy()
+    if section_df.empty:
+        print(f"⚠️ {section_title} 無資料，Equipment Performance 將跳過")
+        return start_row
+
+    equipment_column = find_equipment_column(list(section_df.columns))
+    if not equipment_column:
+        print(f"⚠️ {section_title} 找不到 Equipment 欄位，Equipment Performance 將跳過")
+        return start_row
+
+    if group_with_location and "Location" not in section_df.columns:
+        section_df["Location"] = ""
+
+    section_df[STATION_NAME_HEADER] = build_station_name_series(
+        section_df,
+        category_column="_category",
+        equipment_column=equipment_column,
+    )
+    station_names = _build_station_name_order(section_df[STATION_NAME_HEADER])
+    if not station_names:
+        print(f"⚠️ {section_title} Station Name 無有效資料，Equipment Performance 將跳過")
+        return start_row
+
+    rename_map: dict[str, str] = {}
+    for item in items:
+        matched = _find_equipment_performance_column(list(section_df.columns), item)
+        if matched:
+            rename_map[matched] = item
+        else:
+            section_df[item] = None
+    if rename_map:
+        section_df = section_df.rename(columns=rename_map)
+
+    for item in items:
+        section_df[item] = pd.to_numeric(section_df[item], errors="coerce")
+
+    group_fields = [STATION_NAME_HEADER, equipment_column]
+    if group_with_location:
+        group_fields.append("Location")
+
+    summary = (
+        section_df.groupby(group_fields, dropna=False)[items]
+        .mean()
+        .reset_index()
+    )
+
+    ws.cell(row=start_row, column=1, value=section_title)
+    block_start_row = start_row + 1
+    chart_columns = [8, 16, 24, 32]
+    chart_height_rows = 15
+
+    for station in station_names:
+        station_summary = summary[summary[STATION_NAME_HEADER] == station].copy()
+        if group_with_location:
+            station_summary["Equipment Display"] = station_summary.apply(
+                lambda row: " ".join(
+                    part
+                    for part in [str(row.get(equipment_column, "")).strip(), str(row.get("Location", "")).strip()]
+                    if part
+                ),
+                axis=1,
+            )
+            display_column = "Equipment Display"
+            header_label = "Equipment / Location"
+        else:
+            display_column = equipment_column
+            header_label = "Equipment"
+
+        station_summary = station_summary.sort_values(display_column)
+        if station_summary.empty:
+            station_summary = pd.DataFrame(
+                [{display_column: "", **{item: None for item in items}}]
+            )
+
+        data_columns = [display_column, *items]
+        station_summary = station_summary[data_columns]
+
+        title_row = block_start_row
+        header_row = block_start_row + 1
+        data_row_start = block_start_row + 2
+
+        ws.cell(row=title_row, column=1, value=station)
+        ws.cell(row=header_row, column=1, value=header_label)
+        for idx, item in enumerate(items, start=2):
+            ws.cell(row=header_row, column=idx, value=item)
+
+        for row_offset, row in enumerate(station_summary.itertuples(index=False), start=0):
+            for col_offset, value in enumerate(row, start=1):
+                ws.cell(row=data_row_start + row_offset, column=col_offset, value=value)
+
+        data_row_end = data_row_start + len(station_summary) - 1
+        categories_ref = Reference(ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+
+        chart_col_index = 0
+        for item_index, item in enumerate(items):
+            if not station_summary[item].notna().any():
+                continue
+            if chart_col_index >= len(chart_columns):
+                break
+            data_ref = Reference(
+                ws,
+                min_col=item_index + 2,
+                min_row=header_row,
+                max_row=data_row_end,
+            )
+            chart = LineChart()
+            chart.title = f"{station} {item}"
+            chart.y_axis.title = item
+            chart.x_axis.title = header_label
+            chart.add_data(data_ref, titles_from_data=True)
+            chart.set_categories(categories_ref)
+            chart.height = 7
+            chart.width = 14
+            anchor_col = get_column_letter(chart_columns[chart_col_index])
+            ws.add_chart(chart, f"{anchor_col}{title_row}")
+            chart_col_index += 1
+
+        table_height = len(station_summary) + 2
+        block_height = max(table_height, chart_height_rows if chart_col_index else table_height) + 3
+        block_start_row += block_height
+
+    return block_start_row + 1
 
 
 def _compute_group_fpy(
@@ -797,6 +1024,53 @@ def populate_combined_data_analysis(workbook: Workbook, report_results: dict[str
         )
 
 
+def populate_equipment_performance_sheet(workbook: Workbook, report_results: dict[str, dict[str, object]]) -> None:
+    trx_result = report_results.get("800G_TRX")
+    if not trx_result:
+        print("⚠️ 找不到 800G_TRX 資料，Equipment Performance 將跳過")
+        return
+
+    module = trx_result["module"]
+    equipment_map = trx_result.get("equipment_map", {})
+    df = trx_result["df"].copy()
+    df = _add_equipment_column(df, module, equipment_map)
+    location_column = find_location_column(list(df.columns))
+    df = _add_location_column(df, location_column)
+
+    if EQUIPMENT_PERFORMANCE_SHEET in workbook.sheetnames:
+        workbook.remove(workbook[EQUIPMENT_PERFORMANCE_SHEET])
+    ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
+
+    next_row = 1
+    next_row = populate_equipment_performance_section(
+        ws,
+        df,
+        categories=["DDMI"],
+        items=EQUIPMENT_PERFORMANCE_DDMI_ITEMS,
+        start_row=next_row,
+        section_title="800G_TRX DDMI",
+        group_with_location=False,
+    )
+    next_row = populate_equipment_performance_section(
+        ws,
+        df,
+        categories=["ATS"],
+        items=EQUIPMENT_PERFORMANCE_ATS_ITEMS,
+        start_row=next_row,
+        section_title="800G_TRX ATS",
+        group_with_location=False,
+    )
+    populate_equipment_performance_section(
+        ws,
+        df,
+        categories=["LT", "HT", "RT"],
+        items=EQUIPMENT_PERFORMANCE_TH_ITEMS,
+        start_row=next_row,
+        section_title="800G_TRX LT/HT/RT",
+        group_with_location=True,
+    )
+
+
 def main() -> None:
     args = parse_args()
     start_date = parse_date(args.start_date).isoformat()
@@ -804,6 +1078,7 @@ def main() -> None:
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     out_path = normalize_output_path(base_dir, args.output_path, args.start_date, args.end_date)
+    out_path = ensure_unique_output_path(out_path)
 
     reports = [
         {
@@ -850,10 +1125,12 @@ def main() -> None:
             report_results[report["sheet_prefix"]] = result
 
         populate_combined_data_analysis(workbook, report_results)
+        populate_equipment_performance_sheet(workbook, report_results)
         equipment_status = build_equipment_status_table(report_results)
         write_dataframe_to_sheet(workbook, EQUIPMENT_STATUS_SHEET, equipment_status)
         format_equipment_status_sheet(workbook[EQUIPMENT_STATUS_SHEET])
         move_sheet_after(workbook, EQUIPMENT_STATUS_SHEET, DATA_ANALYSIS_SHEET)
+        move_sheet_after(workbook, EQUIPMENT_PERFORMANCE_SHEET, EQUIPMENT_STATUS_SHEET)
         hide_sheet(workbook, "Error Code")
         hide_sheet(workbook, "800G_TRX 其他")
         hide_sheet(workbook, "800G_Fixed_BER 其他")
