@@ -177,8 +177,8 @@ def build_ui() -> tk.Tk:
     style.configure("Card.TFrame", background="#ffffff", relief="ridge", borderwidth=1)
     style.configure(
         "Primary.TButton",
-        font=("Segoe UI", 9, "bold"),
-        padding=(8, 6),
+        font=("Segoe UI", 9),
+        padding=(12, 10),
         relief="raised",
         borderwidth=2,
         background="#f0f2f6",
@@ -308,7 +308,7 @@ def build_ui() -> tk.Tk:
     )
     daily_checkbutton.pack(side="left", padx=(0, 12))
 
-    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 12))
+    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(10, 10))
     buttons_frame.pack(fill="x", pady=(16, 0))
 
     buttons_frame.columnconfigure((0, 1), weight=1, uniform="button")
