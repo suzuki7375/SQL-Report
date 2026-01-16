@@ -381,13 +381,8 @@ def _compute_group_fpy(
 
 def build_error_code_summary(report_results: dict[str, dict[str, object]]) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
-    report_name_map = {
-        "800G_TRX": "800G_TRX_TEST",
-        "800G_Fixed_BER": "800G_Fixed_BER_Test",
-        "BER_Symbol_Error": "BER_Symbol_Error_Test",
-    }
 
-    for sheet_prefix, result in report_results.items():
+    for result in report_results.values():
         failed_devices = result.get("failed_devices")
         if failed_devices is None or failed_devices.empty:
             continue
@@ -405,10 +400,7 @@ def build_error_code_summary(report_results: dict[str, dict[str, object]]) -> pd
         df = df[df[ERROR_CODE_CANONICAL_HEADER] != ""]
         if df.empty:
             continue
-        if "Category" not in df.columns:
-            df["Category"] = ""
-        df["Report"] = report_name_map.get(sheet_prefix, sheet_prefix)
-        frames.append(df[["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]])
+        frames.append(df[["Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]])
 
     if not frames:
         return pd.DataFrame()
@@ -416,14 +408,14 @@ def build_error_code_summary(report_results: dict[str, dict[str, object]]) -> pd
     combined = pd.concat(frames, ignore_index=True)
     counts = (
         combined.groupby(
-            ["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER],
+            ["Equipment", "Location", ERROR_CODE_CANONICAL_HEADER],
             dropna=False,
         )
         .size()
         .reset_index(name="count")
     )
     summary = counts.pivot_table(
-        index=["Report", "Category", "Equipment", "Location"],
+        index=["Equipment", "Location"],
         columns=ERROR_CODE_CANONICAL_HEADER,
         values="count",
         fill_value=0,
@@ -529,7 +521,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
     if not error_code_summary.empty:
         table = table.merge(
             error_code_summary,
-            on=["Report", "Category", "Equipment", "Location"],
+            on=["Equipment", "Location"],
             how="left",
         )
 
