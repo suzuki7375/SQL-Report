@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
+    parser.add_argument("--output-path", help="輸出檔案完整路徑 (可省略副檔名)")
     return parser.parse_args()
 
 
@@ -78,6 +79,29 @@ def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
     date_range = format_date_range(start_date, end_date)
     filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
     return os.path.join(base_dir, filename)
+
+
+def normalize_output_path(
+    base_dir: str,
+    output_path: str | None,
+    start_date: str,
+    end_date: str,
+) -> str:
+    if not output_path:
+        return build_output_path(base_dir, start_date, end_date)
+
+    expanded_path = os.path.expanduser(output_path)
+    if not os.path.isabs(expanded_path):
+        expanded_path = os.path.join(base_dir, expanded_path)
+
+    if os.path.isdir(expanded_path):
+        filename = os.path.basename(build_output_path(base_dir, start_date, end_date))
+        return os.path.join(expanded_path, filename)
+
+    root, ext = os.path.splitext(expanded_path)
+    if ext.lower() != OUTPUT_EXTENSION:
+        return f"{expanded_path}{OUTPUT_EXTENSION}"
+    return expanded_path
 
 
 def load_module(module_path: str, module_name: str):
@@ -774,7 +798,7 @@ def main() -> None:
     end_date = parse_date(args.end_date).isoformat()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = build_output_path(base_dir, args.start_date, args.end_date)
+    out_path = normalize_output_path(base_dir, args.output_path, args.start_date, args.end_date)
 
     reports = [
         {

@@ -8,7 +8,7 @@ import runpy
 import subprocess
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, ttk
 
 
 SCRIPT_NAME = "800G_TRX_TEST.py"
@@ -251,6 +251,20 @@ def build_ui() -> tk.Tk:
     progress = ttk.Progressbar(status_frame, mode="indeterminate")
     progress.pack(side="right", fill="x", expand=True, padx=(16, 0))
 
+    schedule_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
+    schedule_frame.pack(fill="x", pady=(16, 0))
+
+    ttk.Label(schedule_frame, text="排程 Combined Report", style="Title.TLabel").pack(anchor="w")
+    schedule_controls = ttk.Frame(schedule_frame, style="Card.TFrame")
+    schedule_controls.pack(fill="x", pady=(8, 0))
+
+    schedule_date_picker = DatePicker(schedule_controls, today)
+    schedule_date_picker.pack(side="left", padx=(0, 8))
+
+    time_var = tk.StringVar(value=datetime.datetime.now().strftime("%H:%M"))
+    time_entry = ttk.Entry(schedule_controls, textvariable=time_var, width=8)
+    time_entry.pack(side="left", padx=(0, 8))
+
     buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(10, 6))
     buttons_frame.pack(fill="both", expand=True, pady=(16, 0))
 
@@ -259,6 +273,7 @@ def build_ui() -> tk.Tk:
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
+    scheduled_job_id: str | None = None
 
     def set_loading(is_loading: bool) -> None:
         state = "disabled" if is_loading else "normal"
@@ -281,12 +296,37 @@ def build_ui() -> tk.Tk:
         running_process = None
         set_loading(False)
 
-    def run_report(script_name: str) -> None:
+    def format_date_range(start_date: str, end_date: str) -> str:
+        if start_date == end_date:
+            return start_date
+        return f"{start_date}_{end_date}"
+
+    def build_combined_default_output_path() -> str:
+        base_name = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
+        date_range = format_date_range(start_picker.value, end_picker.value)
+        filename = f"{base_name}_{date_range}.xlsx"
+        return os.path.join(get_base_dir(), filename)
+
+    def select_output_path() -> str | None:
+        default_path = build_combined_default_output_path()
+        initial_dir = os.path.dirname(default_path)
+        initial_file = os.path.basename(default_path)
+        return filedialog.asksaveasfilename(
+            title="選擇 Combined Report 輸出位置",
+            defaultextension=".xlsx",
+            initialdir=initial_dir,
+            initialfile=initial_file,
+            filetypes=[("Excel 檔案", "*.xlsx"), ("所有檔案", "*.*")],
+        )
+
+    def run_report(script_name: str, extra_args: list[str] | None = None) -> None:
         nonlocal running_process
         if running_process is not None:
             return
         base_dir = get_base_dir()
         args = ["--start-date", start_picker.value, "--end-date", end_picker.value]
+        if extra_args:
+            args.extend(extra_args)
         if is_frozen():
             running_process = subprocess.Popen(
                 [sys.executable, "--run-script", script_name, *args],
@@ -311,7 +351,54 @@ def build_ui() -> tk.Tk:
         run_report(BER_SYMBOL_ERROR_SCRIPT_NAME)
 
     def run_combined_report() -> None:
-        run_report(COMBINED_REPORT_SCRIPT_NAME)
+        output_path = select_output_path()
+        if not output_path:
+            status_var.set("已取消輸出")
+            return
+        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+
+    def cancel_schedule() -> None:
+        nonlocal scheduled_job_id
+        if scheduled_job_id:
+            root.after_cancel(scheduled_job_id)
+            scheduled_job_id = None
+            status_var.set("已取消排程")
+
+    def schedule_combined_report() -> None:
+        nonlocal scheduled_job_id
+        if running_process is not None:
+            status_var.set("查詢中，請稍候…")
+            return
+
+        output_path = select_output_path()
+        if not output_path:
+            status_var.set("已取消排程")
+            return
+
+        try:
+            schedule_date = datetime.date.fromisoformat(schedule_date_picker.value)
+            schedule_time = datetime.datetime.strptime(time_var.get().strip(), "%H:%M").time()
+        except ValueError:
+            status_var.set("時間格式需為 HH:MM")
+            return
+
+        scheduled_at = datetime.datetime.combine(schedule_date, schedule_time)
+        now = datetime.datetime.now()
+        if scheduled_at <= now:
+            status_var.set("排程時間需晚於現在")
+            return
+
+        if scheduled_job_id:
+            root.after_cancel(scheduled_job_id)
+
+        delay_ms = int((scheduled_at - now).total_seconds() * 1000)
+        def run_scheduled() -> None:
+            nonlocal scheduled_job_id
+            scheduled_job_id = None
+            run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+
+        scheduled_job_id = root.after(delay_ms, run_scheduled)
+        status_var.set(f"已排程 {scheduled_at:%Y-%m-%d %H:%M} 執行 Combined Report")
 
     main_button = ttk.Button(
         buttons_frame,
@@ -340,6 +427,22 @@ def build_ui() -> tk.Tk:
     symbol_error_button.grid(row=0, column=2, padx=12, pady=12, sticky="nsew")
     button_refs.append(symbol_error_button)
 
+    schedule_button = ttk.Button(
+        schedule_controls,
+        text="排程執行",
+        style="Secondary.TButton",
+        command=schedule_combined_report,
+    )
+    schedule_button.pack(side="left", padx=(0, 8))
+
+    cancel_schedule_button = ttk.Button(
+        schedule_controls,
+        text="取消排程",
+        style="Secondary.TButton",
+        command=cancel_schedule,
+    )
+    cancel_schedule_button.pack(side="left")
+
     combined_report_button = ttk.Button(
         buttons_frame,
         text=COMBINED_REPORT_BUTTON_LABEL,
@@ -348,6 +451,7 @@ def build_ui() -> tk.Tk:
     )
     combined_report_button.grid(row=1, column=0, padx=12, pady=12, sticky="nsew")
     button_refs.append(combined_report_button)
+    button_refs.extend([schedule_button, cancel_schedule_button])
 
     for index in range(4, BUTTON_COUNT):
         button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
