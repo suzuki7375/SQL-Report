@@ -91,8 +91,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--start-time", help="HH:MM 或 TESTNUMBER(YYYYMMDDHHMM...)")
-    parser.add_argument("--end-time", help="HH:MM 或 TESTNUMBER(YYYYMMDDHHMM...)")
+    parser.add_argument("--start-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
+    parser.add_argument("--end-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
     return parser.parse_args()
 
 
@@ -115,20 +115,12 @@ def parse_datetime_value(date_value: str, time_value: str | None, is_end: bool) 
                 datetime.time(23, 59, 59) if is_end else datetime.time(0, 0, 0),
             )
         if len(digits) == 6:
-            if digits == "240000":
-                if is_end:
-                    return datetime.datetime.combine(parse_date(date_value), datetime.time(23, 59, 59))
-                raise ValueError("起始時間不可為 24:00")
             time_part = datetime.datetime.strptime(digits, "%H%M%S").time()
             return datetime.datetime.combine(parse_date(date_value), time_part)
         if len(digits) == 4:
-            if digits == "2400":
-                if is_end:
-                    return datetime.datetime.combine(parse_date(date_value), datetime.time(23, 59, 59))
-                raise ValueError("起始時間不可為 24:00")
             time_part = datetime.datetime.strptime(digits, "%H%M").time()
             return datetime.datetime.combine(parse_date(date_value), time_part)
-        raise ValueError("時間格式需為 HH:MM 或 TESTNUMBER(YYYYMMDDHHMM...)")
+        raise ValueError("時間格式需為 HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
     base_date = parse_date(date_value)
     return datetime.datetime.combine(
         base_date,

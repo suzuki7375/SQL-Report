@@ -177,11 +177,6 @@ def build_ui() -> tk.Tk:
     style.configure("Main.TFrame", background="#f7f7fb")
     style.configure("Card.TFrame", background="#ffffff", relief="ridge", borderwidth=1)
     style.configure(
-        "TButton",
-        font=("Segoe UI", 9),
-        foreground="#1f2933",
-    )
-    style.configure(
         "Primary.TButton",
         font=("Segoe UI", 9, "bold"),
         padding=(12, 10),
@@ -208,13 +203,11 @@ def build_ui() -> tk.Tk:
     style.map(
         "Primary.TButton",
         background=[("pressed", "#d9dee8"), ("active", "#f7f9fc")],
-        foreground=[("disabled", "#9aa0aa"), ("active", "#111827"), ("!disabled", "#1f2933")],
         relief=[("pressed", "sunken"), ("!pressed", "raised")],
     )
     style.map(
         "Secondary.TButton",
         background=[("pressed", "#e2e7f1"), ("active", "#f3f5f9")],
-        foreground=[("disabled", "#9aa0aa"), ("active", "#374151"), ("!disabled", "#4b5563")],
         relief=[("pressed", "sunken"), ("!pressed", "raised")],
     )
     style.configure("Date.TButton", padding=4)
@@ -252,18 +245,18 @@ def build_ui() -> tk.Tk:
     time_frame.pack(fill="x", pady=(0, 12))
 
     ttk.Label(time_frame, text="時間", style="Title.TLabel").pack(side="left")
-    ttk.Label(time_frame, text="(HH:MM 或 TESTNUMBER，可空白)", style="Sub.TLabel").pack(
+    ttk.Label(time_frame, text="(HHMM 或 TESTNUMBER，可空白)", style="Sub.TLabel").pack(
         side="left",
         padx=(8, 12),
     )
 
-    start_time_var = tk.StringVar(value="00:00")
+    start_time_var = tk.StringVar()
     start_time_entry = ttk.Entry(time_frame, textvariable=start_time_var, width=18)
     start_time_entry.pack(side="left", padx=(0, 8))
 
     ttk.Label(time_frame, text="~", style="Title.TLabel").pack(side="left")
 
-    end_time_var = tk.StringVar(value="24:00")
+    end_time_var = tk.StringVar()
     end_time_entry = ttk.Entry(time_frame, textvariable=end_time_var, width=18)
     end_time_entry.pack(side="left", padx=(8, 0))
 
