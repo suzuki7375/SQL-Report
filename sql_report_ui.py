@@ -19,7 +19,6 @@ BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
-BUTTON_COUNT = 6
 
 
 def is_frozen() -> bool:
@@ -178,8 +177,8 @@ def build_ui() -> tk.Tk:
     style.configure("Card.TFrame", background="#ffffff", relief="ridge", borderwidth=1)
     style.configure(
         "Primary.TButton",
-        font=("Segoe UI", 9, "bold"),
-        padding=(12, 10),
+        font=("Segoe UI", 10, "bold"),
+        padding=(16, 12),
         relief="raised",
         borderwidth=2,
         background="#f0f2f6",
@@ -265,11 +264,11 @@ def build_ui() -> tk.Tk:
     time_entry = ttk.Entry(schedule_controls, textvariable=time_var, width=8)
     time_entry.pack(side="left", padx=(0, 8))
 
-    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(10, 6))
+    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 12))
     buttons_frame.pack(fill="both", expand=True, pady=(16, 0))
 
-    buttons_frame.columnconfigure((0, 1, 2), weight=1, uniform="button")
-    buttons_frame.rowconfigure((0, 1), weight=1)
+    buttons_frame.columnconfigure((0, 1), weight=1, uniform="button")
+    buttons_frame.rowconfigure((0, 1), weight=1, uniform="button-row")
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
@@ -406,7 +405,7 @@ def build_ui() -> tk.Tk:
         command=run_trx_test,
         style="Primary.TButton",
     )
-    main_button.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
+    main_button.grid(row=0, column=0, padx=12, pady=10, sticky="nsew")
     button_refs.append(main_button)
 
     fixed_ber_button = ttk.Button(
@@ -415,7 +414,7 @@ def build_ui() -> tk.Tk:
         command=run_fixed_ber_test,
         style="Primary.TButton",
     )
-    fixed_ber_button.grid(row=0, column=1, padx=12, pady=12, sticky="nsew")
+    fixed_ber_button.grid(row=0, column=1, padx=12, pady=10, sticky="nsew")
     button_refs.append(fixed_ber_button)
 
     symbol_error_button = ttk.Button(
@@ -424,7 +423,7 @@ def build_ui() -> tk.Tk:
         command=run_ber_symbol_error_test,
         style="Primary.TButton",
     )
-    symbol_error_button.grid(row=0, column=2, padx=12, pady=12, sticky="nsew")
+    symbol_error_button.grid(row=1, column=0, padx=12, pady=10, sticky="nsew")
     button_refs.append(symbol_error_button)
 
     schedule_button = ttk.Button(
@@ -449,16 +448,9 @@ def build_ui() -> tk.Tk:
         command=run_combined_report,
         style="Primary.TButton",
     )
-    combined_report_button.grid(row=1, column=0, padx=12, pady=12, sticky="nsew")
+    combined_report_button.grid(row=1, column=1, padx=12, pady=10, sticky="nsew")
     button_refs.append(combined_report_button)
     button_refs.extend([schedule_button, cancel_schedule_button])
-
-    for index in range(4, BUTTON_COUNT):
-        button = ttk.Button(buttons_frame, text="待新增", style="Secondary.TButton")
-        row = index // 3
-        col = index % 3
-        button.grid(row=row, column=col, padx=12, pady=12, sticky="nsew")
-        button_refs.append(button)
 
     return root
 
