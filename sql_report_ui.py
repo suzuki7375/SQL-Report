@@ -178,7 +178,7 @@ def build_ui() -> tk.Tk:
     style.configure(
         "Primary.TButton",
         font=("Segoe UI", 9, "bold"),
-        padding=(12, 10),
+        padding=(8, 6),
         relief="raised",
         borderwidth=2,
         background="#f0f2f6",
@@ -494,7 +494,7 @@ def build_ui() -> tk.Tk:
         command=run_trx_test,
         style="Primary.TButton",
     )
-    main_button.grid(row=0, column=0, padx=12, pady=10, sticky="nsew")
+    main_button.grid(row=0, column=0, padx=8, pady=6, sticky="nsew")
     button_refs.append(main_button)
 
     fixed_ber_button = ttk.Button(
@@ -503,7 +503,7 @@ def build_ui() -> tk.Tk:
         command=run_fixed_ber_test,
         style="Primary.TButton",
     )
-    fixed_ber_button.grid(row=0, column=1, padx=12, pady=10, sticky="nsew")
+    fixed_ber_button.grid(row=0, column=1, padx=8, pady=6, sticky="nsew")
     button_refs.append(fixed_ber_button)
 
     symbol_error_button = ttk.Button(
@@ -512,7 +512,7 @@ def build_ui() -> tk.Tk:
         command=run_ber_symbol_error_test,
         style="Primary.TButton",
     )
-    symbol_error_button.grid(row=1, column=0, padx=12, pady=10, sticky="nsew")
+    symbol_error_button.grid(row=1, column=0, padx=8, pady=6, sticky="nsew")
     button_refs.append(symbol_error_button)
 
     schedule_button = ttk.Button(
@@ -537,7 +537,7 @@ def build_ui() -> tk.Tk:
         command=run_combined_report,
         style="Primary.TButton",
     )
-    combined_report_button.grid(row=1, column=1, padx=12, pady=10, sticky="nsew")
+    combined_report_button.grid(row=1, column=1, padx=8, pady=6, sticky="nsew")
     button_refs.append(combined_report_button)
     button_refs.extend([schedule_button, cancel_schedule_button])
 
