@@ -21,7 +21,6 @@ EQUIPMENT_STATUS_SHEET = "equiment status"
 ERROR_CODE_HEADER_DEFAULT = "Error code"
 STATION_NAME_HEADER = "STATION NAME"
 ERROR_CODE_CANONICAL_HEADER = "Error Code"
-EQUIPMENT_STATUS_CATEGORY_HEADER = "分類方式"
 STATION_NAME_MAP = {
     "ATS": {
         "T157100002205_1": "ATS1_L",
@@ -514,7 +513,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
         return pd.DataFrame(
             columns=[
                 "Report",
-                EQUIPMENT_STATUS_CATEGORY_HEADER,
+                "Category",
                 "Equipment",
                 STATION_NAME_HEADER,
                 "Location",
@@ -533,19 +532,9 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
             how="left",
         )
 
-    report_order = ["800G_TRX_TEST", "800G_Fixed_BER_Test", "BER_Symbol_Error_Test"]
-    category_order = ["ATS", "DDMI", "RT", "LT", "HT", "3T_BER", "TC_BER"]
-    table["_report_order"] = pd.Categorical(table["Report"], categories=report_order, ordered=True)
-    table["_category_order"] = pd.Categorical(table["Category"], categories=category_order, ordered=True)
-    table = table.sort_values(
-        by=["_report_order", "_category_order", "Equipment", "Location"],
-        kind="stable",
-        na_position="last",
-    ).drop(columns=["_report_order", "_category_order"])
-
     column_order = [
         "Report",
-        EQUIPMENT_STATUS_CATEGORY_HEADER,
+        "Category",
         "Equipment",
         STATION_NAME_HEADER,
         "Location",
@@ -553,7 +542,6 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
         "fpy_output",
         "Yield rate",
     ]
-    table = table.rename(columns={"Category": EQUIPMENT_STATUS_CATEGORY_HEADER})
     for column in column_order:
         if column not in table.columns:
             table[column] = ""
