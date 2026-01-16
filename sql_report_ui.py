@@ -410,8 +410,7 @@ def build_ui() -> tk.Tk:
         output_dir = resolve_output_dir()
         if not output_dir:
             return
-        output_path = build_combined_default_output_path(output_dir)
-        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_dir])
 
     def cancel_schedule() -> None:
         nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
