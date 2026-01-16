@@ -168,7 +168,7 @@ class DatePicker(ttk.Frame):
 def build_ui() -> tk.Tk:
     root = tk.Tk()
     root.title("800G 2FR4 SQL DATA")
-    root.geometry("700x420")
+    root.geometry("760x520")
     root.configure(bg="#f7f7fb")
 
     style = ttk.Style(root)
@@ -177,8 +177,8 @@ def build_ui() -> tk.Tk:
     style.configure("Card.TFrame", background="#ffffff", relief="ridge", borderwidth=1)
     style.configure(
         "Primary.TButton",
-        font=("Segoe UI", 10, "bold"),
-        padding=(16, 12),
+        font=("Segoe UI", 9, "bold"),
+        padding=(12, 10),
         relief="raised",
         borderwidth=2,
         background="#f0f2f6",
@@ -264,11 +264,19 @@ def build_ui() -> tk.Tk:
     time_entry = ttk.Entry(schedule_controls, textvariable=time_var, width=8)
     time_entry.pack(side="left", padx=(0, 8))
 
+    daily_schedule_var = tk.BooleanVar(value=False)
+    daily_checkbutton = ttk.Checkbutton(
+        schedule_controls,
+        text="每日",
+        variable=daily_schedule_var,
+    )
+    daily_checkbutton.pack(side="left", padx=(0, 12))
+
     buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 12))
-    buttons_frame.pack(fill="both", expand=True, pady=(16, 0))
+    buttons_frame.pack(fill="x", pady=(16, 0))
 
     buttons_frame.columnconfigure((0, 1), weight=1, uniform="button")
-    buttons_frame.rowconfigure((0, 1), weight=1, uniform="button-row")
+    buttons_frame.rowconfigure((0, 1), weight=0)
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
@@ -363,6 +371,18 @@ def build_ui() -> tk.Tk:
             scheduled_job_id = None
             status_var.set("已取消排程")
 
+    def next_daily_run(schedule_time: datetime.time) -> datetime.datetime:
+        now = datetime.datetime.now()
+        candidate = now.replace(
+            hour=schedule_time.hour,
+            minute=schedule_time.minute,
+            second=0,
+            microsecond=0,
+        )
+        if candidate <= now:
+            candidate += datetime.timedelta(days=1)
+        return candidate
+
     def schedule_combined_report() -> None:
         nonlocal scheduled_job_id
         if running_process is not None:
@@ -375,29 +395,42 @@ def build_ui() -> tk.Tk:
             return
 
         try:
-            schedule_date = datetime.date.fromisoformat(schedule_date_picker.value)
             schedule_time = datetime.datetime.strptime(time_var.get().strip(), "%H:%M").time()
         except ValueError:
             status_var.set("時間格式需為 HH:MM")
             return
 
-        scheduled_at = datetime.datetime.combine(schedule_date, schedule_time)
-        now = datetime.datetime.now()
-        if scheduled_at <= now:
-            status_var.set("排程時間需晚於現在")
-            return
+        if daily_schedule_var.get():
+            scheduled_at = next_daily_run(schedule_time)
+        else:
+            schedule_date = datetime.date.fromisoformat(schedule_date_picker.value)
+            scheduled_at = datetime.datetime.combine(schedule_date, schedule_time)
+            if scheduled_at <= datetime.datetime.now():
+                status_var.set("排程時間需晚於現在")
+                return
 
         if scheduled_job_id:
             root.after_cancel(scheduled_job_id)
 
-        delay_ms = int((scheduled_at - now).total_seconds() * 1000)
+        delay_ms = int((scheduled_at - datetime.datetime.now()).total_seconds() * 1000)
         def run_scheduled() -> None:
             nonlocal scheduled_job_id
             scheduled_job_id = None
             run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
+            if daily_schedule_var.get():
+                next_run = next_daily_run(schedule_time)
+                scheduled_job_id = root.after(
+                    int((next_run - datetime.datetime.now()).total_seconds() * 1000),
+                    run_scheduled,
+                )
+                status_var.set(f"每日排程：下一次 {next_run:%Y-%m-%d %H:%M} 執行 Combined Report")
+                return
 
         scheduled_job_id = root.after(delay_ms, run_scheduled)
-        status_var.set(f"已排程 {scheduled_at:%Y-%m-%d %H:%M} 執行 Combined Report")
+        if daily_schedule_var.get():
+            status_var.set(f"每日排程：下一次 {scheduled_at:%Y-%m-%d %H:%M} 執行 Combined Report")
+        else:
+            status_var.set(f"已排程 {scheduled_at:%Y-%m-%d %H:%M} 執行 Combined Report")
 
     main_button = ttk.Button(
         buttons_frame,
