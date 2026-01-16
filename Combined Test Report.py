@@ -21,7 +21,6 @@ EQUIPMENT_STATUS_SHEET = "equiment status"
 ERROR_CODE_HEADER_DEFAULT = "Error code"
 STATION_NAME_HEADER = "STATION NAME"
 ERROR_CODE_CANONICAL_HEADER = "Error Code"
-EQUIPMENT_STATUS_CATEGORY_HEADER = "分類方式"
 STATION_NAME_MAP = {
     "ATS": {
         "T157100002205_1": "ATS1_L",
@@ -530,7 +529,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
         return pd.DataFrame(
             columns=[
                 "Report",
-                EQUIPMENT_STATUS_CATEGORY_HEADER,
+                "Category",
                 "Equipment",
                 STATION_NAME_HEADER,
                 "Location",
@@ -561,7 +560,7 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
 
     column_order = [
         "Report",
-        EQUIPMENT_STATUS_CATEGORY_HEADER,
+        "Category",
         "Equipment",
         STATION_NAME_HEADER,
         "Location",
@@ -569,7 +568,6 @@ def build_equipment_status_table(report_results: dict[str, dict[str, object]]) -
         "fpy_output",
         "Yield rate",
     ]
-    table = table.rename(columns={"Category": EQUIPMENT_STATUS_CATEGORY_HEADER})
     for column in column_order:
         if column not in table.columns:
             table[column] = ""
