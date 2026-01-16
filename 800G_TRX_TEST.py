@@ -650,7 +650,9 @@ def build_failed_devices(df: pd.DataFrame) -> pd.DataFrame:
                     for column in ch_pass_fail_columns
                     for value in test_df[column]
                 ):
-                    failed_tests.append(test_df)
+                    failed_record = test_df.copy()
+                    failed_record["Category"] = category
+                    failed_tests.append(failed_record)
 
     if failed_tests:
         failed_df = pd.concat(failed_tests, ignore_index=True)
