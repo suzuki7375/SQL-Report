@@ -4,7 +4,6 @@ import argparse
 import datetime
 import importlib.util
 import os
-import re
 import sys
 import time
 
@@ -52,8 +51,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--start-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
-    parser.add_argument("--end-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
     return parser.parse_args()
 
 
@@ -64,46 +61,15 @@ def parse_date(value: str) -> datetime.date:
         raise ValueError("日期格式需為 YYYY-MM-DD") from exc
 
 
-def parse_datetime_value(date_value: str, time_value: str | None, is_end: bool) -> datetime.datetime:
-    digits = re.sub(r"\D", "", time_value or "")
-    if digits:
-        if len(digits) >= 12:
-            return datetime.datetime.strptime(digits[:12], "%Y%m%d%H%M")
-        if len(digits) == 8:
-            base_date = datetime.datetime.strptime(digits, "%Y%m%d").date()
-            return datetime.datetime.combine(
-                base_date,
-                datetime.time(23, 59, 59) if is_end else datetime.time(0, 0, 0),
-            )
-        if len(digits) == 6:
-            time_part = datetime.datetime.strptime(digits, "%H%M%S").time()
-            return datetime.datetime.combine(parse_date(date_value), time_part)
-        if len(digits) == 4:
-            time_part = datetime.datetime.strptime(digits, "%H%M").time()
-            return datetime.datetime.combine(parse_date(date_value), time_part)
-        raise ValueError("時間格式需為 HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
-    base_date = parse_date(date_value)
-    return datetime.datetime.combine(
-        base_date,
-        datetime.time(23, 59, 59) if is_end else datetime.time(0, 0, 0),
-    )
+def format_date_range(start_date: str, end_date: str) -> str:
+    if start_date == end_date:
+        return start_date
+    return f"{start_date}_{end_date}"
 
 
-def format_datetime_label(value: datetime.datetime, time_value: str | None) -> str:
-    if re.sub(r"\D", "", time_value or ""):
-        return value.strftime("%Y%m%d%H%M")
-    return value.date().isoformat()
-
-
-def format_date_range(start_label: str, end_label: str) -> str:
-    if start_label == end_label:
-        return start_label
-    return f"{start_label}_{end_label}"
-
-
-def build_output_path(base_dir: str, start_label: str, end_label: str) -> str:
+def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
     base_name = os.path.splitext(os.path.basename(__file__))[0]
-    date_range = format_date_range(start_label, end_label)
+    date_range = format_date_range(start_date, end_date)
     filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
     return os.path.join(base_dir, filename)
 
@@ -146,7 +112,7 @@ def set_cell_value(ws, row: int, column: int, value: object) -> None:
             return
 
 
-def export_report_dataframe(module, start_datetime: str, end_datetime: str) -> pd.DataFrame:
+def export_report_dataframe(module, start_date: str, end_date: str) -> pd.DataFrame:
     with pyodbc.connect(module.conn_str_with_db(module.DATABASE), timeout=30) as conn:
         if hasattr(module, "build_columns_query"):
             use_openquery = False
@@ -158,14 +124,14 @@ def export_report_dataframe(module, start_datetime: str, end_datetime: str) -> p
                 cur.execute(module.build_columns_query(True))
 
             if use_openquery and hasattr(module, "build_sorted_query_openquery"):
-                export_sql = module.build_sorted_query_openquery(module.EXPORT_N, start_datetime, end_datetime)
+                export_sql = module.build_sorted_query_openquery(module.EXPORT_N, start_date, end_date)
                 df = pd.read_sql_query(export_sql, conn)
             else:
                 export_sql = module.build_sorted_query(module.EXPORT_N)
-                df = pd.read_sql_query(export_sql, conn, params=[start_datetime, end_datetime])
+                df = pd.read_sql_query(export_sql, conn, params=[start_date, end_date])
         else:
             export_sql = module.build_sorted_query(module.EXPORT_N)
-            df = pd.read_sql_query(export_sql, conn, params=[start_datetime, end_datetime])
+            df = pd.read_sql_query(export_sql, conn, params=[start_date, end_date])
 
     return module.apply_header(df)
 
@@ -595,14 +561,14 @@ def build_report(
     categories: list[str],
     category_builder,
     workbook: Workbook,
-    start_datetime: str,
-    end_datetime: str,
+    start_date: str,
+    end_date: str,
     base_dir: str,
 ) -> dict[str, object]:
     print(f"\n🚀 開始整合：{sheet_prefix}")
     t0 = time.time()
 
-    df = export_report_dataframe(module, start_datetime, end_datetime)
+    df = export_report_dataframe(module, start_date, end_date)
     print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
 
     if module.CH_NUMBER_HEADER not in df.columns:
@@ -745,17 +711,11 @@ def populate_combined_data_analysis(workbook: Workbook, report_results: dict[str
 
 def main() -> None:
     args = parse_args()
-    start_dt = parse_datetime_value(args.start_date, args.start_time, False)
-    end_dt = parse_datetime_value(args.end_date, args.end_time, True)
-    if end_dt < start_dt:
-        raise ValueError("結束時間需晚於開始時間")
-    start_label = format_datetime_label(start_dt, args.start_time)
-    end_label = format_datetime_label(end_dt, args.end_time)
-    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+    start_date = parse_date(args.start_date).isoformat()
+    end_date = parse_date(args.end_date).isoformat()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = build_output_path(base_dir, start_label, end_label)
+    out_path = build_output_path(base_dir, args.start_date, args.end_date)
 
     reports = [
         {
@@ -795,8 +755,8 @@ def main() -> None:
                 report["categories"],
                 report["category_builder"],
                 workbook,
-                start_datetime,
-                end_datetime,
+                start_date,
+                end_date,
                 base_dir,
             )
             report_results[report["sheet_prefix"]] = result

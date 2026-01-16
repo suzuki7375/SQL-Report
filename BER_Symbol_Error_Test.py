@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import datetime
 import os
-import re
 import sys
 import time
 
@@ -91,47 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--start-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
-    parser.add_argument("--end-time", help="HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
     return parser.parse_args()
-
-
-def parse_date(value: str) -> datetime.date:
-    try:
-        return datetime.date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError("日期格式需為 YYYY-MM-DD") from exc
-
-
-def parse_datetime_value(date_value: str, time_value: str | None, is_end: bool) -> datetime.datetime:
-    digits = re.sub(r"\D", "", time_value or "")
-    if digits:
-        if len(digits) >= 12:
-            return datetime.datetime.strptime(digits[:12], "%Y%m%d%H%M")
-        if len(digits) == 8:
-            base_date = datetime.datetime.strptime(digits, "%Y%m%d").date()
-            return datetime.datetime.combine(
-                base_date,
-                datetime.time(23, 59, 59) if is_end else datetime.time(0, 0, 0),
-            )
-        if len(digits) == 6:
-            time_part = datetime.datetime.strptime(digits, "%H%M%S").time()
-            return datetime.datetime.combine(parse_date(date_value), time_part)
-        if len(digits) == 4:
-            time_part = datetime.datetime.strptime(digits, "%H%M").time()
-            return datetime.datetime.combine(parse_date(date_value), time_part)
-        raise ValueError("時間格式需為 HHMM 或 TESTNUMBER(YYYYMMDDHHMM...)")
-    base_date = parse_date(date_value)
-    return datetime.datetime.combine(
-        base_date,
-        datetime.time(23, 59, 59) if is_end else datetime.time(0, 0, 0),
-    )
-
-
-def format_datetime_label(value: datetime.datetime, time_value: str | None) -> str:
-    if re.sub(r"\D", "", time_value or ""):
-        return value.strftime("%Y%m%d%H%M")
-    return value.date().isoformat()
 
 
 def conn_str_no_db() -> str:
@@ -189,7 +147,7 @@ WITH base AS (
 )
 SELECT TOP {limit} *
 FROM base
-WHERE test_datetime BETWEEN ? AND ?
+WHERE test_date BETWEEN ? AND ?
 ORDER BY test_datetime;
 """.strip()
 
@@ -200,7 +158,10 @@ def build_export_query(limit: int, base_dir: str) -> str:
         return build_sorted_query(limit)
     sql_text = load_sql(sql_path)
     return f"""
-SELECT TOP {limit} *,
+SELECT TOP {limit} *
+FROM ({sql_text}) AS base
+WHERE TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) BETWEEN ? AND ?
+ORDER BY
     DATETIMEFROMPARTS(
         TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
         TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
@@ -209,18 +170,7 @@ SELECT TOP {limit} *,
         TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
         0,
         0
-    ) AS test_datetime
-FROM ({sql_text}) AS base
-WHERE DATETIMEFROMPARTS(
-        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
-        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
-        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
-        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
-        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
-        0,
-        0
-    ) BETWEEN ? AND ?
-ORDER BY test_datetime;
+    );
 """.strip()
 
 
@@ -233,15 +183,15 @@ def apply_header(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def format_date_range(start_label: str, end_label: str) -> str:
-    if start_label == end_label:
-        return start_label
-    return f"{start_label}_{end_label}"
+def format_date_range(start_date: str, end_date: str) -> str:
+    if start_date == end_date:
+        return start_date
+    return f"{start_date}_{end_date}"
 
 
-def build_output_path(base_dir: str, start_label: str, end_label: str) -> str:
+def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
     base_name = os.path.splitext(os.path.basename(__file__))[0]
-    date_range = format_date_range(start_label, end_label)
+    date_range = format_date_range(start_date, end_date)
     filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
     return os.path.join(base_dir, filename)
 
@@ -912,18 +862,10 @@ def populate_data_analysis_sheet(
 
 def main():
     args = parse_args()
-    start_dt = parse_datetime_value(args.start_date, args.start_time, False)
-    end_dt = parse_datetime_value(args.end_date, args.end_time, True)
-    if end_dt < start_dt:
-        raise ValueError("結束時間需晚於開始時間")
-    start_label = format_datetime_label(start_dt, args.start_time)
-    end_label = format_datetime_label(end_dt, args.end_time)
-    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S")
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = build_output_path(base_dir, start_label, end_label)
+    out_path = build_output_path(base_dir, args.start_date, args.end_date)
 
     try:
         print(f"🚀 連線 DB：{DATABASE}")
@@ -942,7 +884,7 @@ def main():
             df = pd.read_sql_query(
                 export_sql,
                 conn,
-                params=[start_datetime, end_datetime],
+                params=[args.start_date, args.end_date],
             )
             df = apply_header(df)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
