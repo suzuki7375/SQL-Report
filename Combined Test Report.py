@@ -246,13 +246,8 @@ def format_equipment_status_sheet(ws) -> None:
         top=Side(style="thin"),
         bottom=Side(style="thin"),
     )
-    header_font = Font(name="Calibri", size=9, bold=True)
-    body_font = Font(name="Calibri", size=11)
+    header_font = Font(bold=True)
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.font = body_font
 
     for cell in ws[1]:
         cell.fill = header_fill
@@ -273,7 +268,7 @@ def format_equipment_status_sheet(ws) -> None:
     for column_cells in ws.columns:
         column_letter = column_cells[0].column_letter
         max_length = max((_measure_cell_length(cell.value) for cell in column_cells), default=0)
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 60)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 60)
 
 
 def reorder_error_code_column(
@@ -410,34 +405,23 @@ def build_error_code_summary(report_results: dict[str, dict[str, object]]) -> pd
         df = df[df[ERROR_CODE_CANONICAL_HEADER] != ""]
         if df.empty:
             continue
-        component_column = module.find_component_column(list(df.columns))
-        if component_column:
-            df["_component_id"] = df[component_column].fillna("").astype(str)
         if "Category" not in df.columns:
             df["Category"] = ""
         df["Report"] = report_name_map.get(sheet_prefix, sheet_prefix)
-        frame_columns = ["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]
-        if "_component_id" in df.columns:
-            frame_columns.append("_component_id")
-        frames.append(df[frame_columns])
+        frames.append(df[["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]])
 
     if not frames:
         return pd.DataFrame()
 
     combined = pd.concat(frames, ignore_index=True)
-    group_columns = ["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER]
-    if "_component_id" in combined.columns:
-        counts = (
-            combined.groupby(group_columns, dropna=False)["_component_id"]
-            .nunique()
-            .reset_index(name="count")
+    counts = (
+        combined.groupby(
+            ["Report", "Category", "Equipment", "Location", ERROR_CODE_CANONICAL_HEADER],
+            dropna=False,
         )
-    else:
-        counts = (
-            combined.groupby(group_columns, dropna=False)
-            .size()
-            .reset_index(name="count")
-        )
+        .size()
+        .reset_index(name="count")
+    )
     summary = counts.pivot_table(
         index=["Report", "Category", "Equipment", "Location"],
         columns=ERROR_CODE_CANONICAL_HEADER,
