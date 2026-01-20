@@ -306,46 +306,20 @@ def build_ui() -> tk.Tk:
     mail_settings_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     mail_settings_frame.pack(fill="x", pady=(12, 0))
 
-    ttk.Label(mail_settings_frame, text="Mail 登入資訊", style="Title.TLabel").pack(anchor="w")
+    ttk.Label(mail_settings_frame, text="Mail 設定", style="Title.TLabel").pack(anchor="w")
 
     mail_settings_grid = ttk.Frame(mail_settings_frame, style="Card.TFrame")
     mail_settings_grid.pack(fill="x", pady=(8, 0))
 
-    login_account_var = tk.StringVar(value=DEFAULT_LOGIN_ACCOUNT)
-    login_password_var = tk.StringVar(value=DEFAULT_LOGIN_PASSWORD)
     recipient_var = tk.StringVar(value=DEFAULT_MAIL_RECIPIENT)
-    auth_url_var = tk.StringVar(value=MAIL_AUTH_URL)
 
-    ttk.Label(mail_settings_grid, text="登入帳號", style="Sub.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-    ttk.Entry(
-        mail_settings_grid,
-        textvariable=login_account_var,
-        width=40,
-        state="readonly",
-        show="•",
-    ).grid(
-        row=0, column=1, sticky="w"
+    ttk.Label(mail_settings_grid, text="登入資訊已隱藏", style="Sub.TLabel").grid(
+        row=0, column=0, sticky="w", padx=(0, 8)
     )
 
-    ttk.Label(mail_settings_grid, text="密碼", style="Sub.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(
-        mail_settings_grid,
-        textvariable=login_password_var,
-        width=40,
-        state="readonly",
-        show="•",
-    ).grid(
-        row=1, column=1, sticky="w", pady=(6, 0)
-    )
-
-    ttk.Label(mail_settings_grid, text="收件者", style="Sub.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+    ttk.Label(mail_settings_grid, text="收件者", style="Sub.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
     ttk.Entry(mail_settings_grid, textvariable=recipient_var, width=40, state="readonly").grid(
-        row=2, column=1, sticky="w", pady=(6, 0)
-    )
-
-    ttk.Label(mail_settings_grid, text="授權網址", style="Sub.TLabel").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(mail_settings_grid, textvariable=auth_url_var, width=120, state="readonly").grid(
-        row=3, column=1, sticky="w", pady=(6, 0)
+        row=1, column=1, sticky="w", pady=(6, 0)
     )
 
     schedule_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
