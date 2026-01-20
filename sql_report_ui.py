@@ -3,6 +3,7 @@
 import argparse
 import calendar
 import datetime
+import importlib.util
 import os
 import runpy
 import subprocess
@@ -305,18 +306,37 @@ def build_ui() -> tk.Tk:
     time_entry.pack(side="left", padx=(0, 8))
 
     daily_schedule_var = tk.BooleanVar(value=False)
+    mail_schedule_var = tk.BooleanVar(value=False)
+
+    def sync_mail_with_daily() -> None:
+        is_daily = daily_schedule_var.get()
+        mail_schedule_var.set(is_daily)
+        mail_checkbutton.configure(state="normal" if is_daily else "disabled")
+
     daily_checkbutton = ttk.Checkbutton(
         schedule_controls,
         text="每日",
         variable=daily_schedule_var,
+        command=sync_mail_with_daily,
     )
     daily_checkbutton.pack(side="left", padx=(0, 12))
+
+    mail_checkbutton = ttk.Checkbutton(
+        schedule_controls,
+        text="Mail",
+        variable=mail_schedule_var,
+        state="disabled",
+    )
+    mail_checkbutton.pack(side="left", padx=(0, 12))
+    sync_mail_with_daily()
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
     scheduled_job_id: str | None = None
     scheduled_output_path: str | None = None
     scheduled_output_dir: str | None = None
+    pending_mail: bool = False
+    pending_mail_path: str | None = None
 
     def set_loading(is_loading: bool) -> None:
         state = "disabled" if is_loading else "normal"
@@ -330,7 +350,7 @@ def build_ui() -> tk.Tk:
             progress.stop()
 
     def check_process() -> None:
-        nonlocal running_process
+        nonlocal running_process, pending_mail, pending_mail_path
         if running_process is None:
             return
         if running_process.poll() is None:
@@ -338,6 +358,17 @@ def build_ui() -> tk.Tk:
             return
         running_process = None
         set_loading(False)
+        if pending_mail:
+            pending_mail = False
+            mail_path = pending_mail_path
+            pending_mail_path = None
+            if mail_path and os.path.isfile(mail_path):
+                subject = f"Combined Report {format_date_range(start_picker.value, end_picker.value)}"
+                body = "請參考附件 Combined Report。"
+                if send_outlook_email("Xiang_lin@aoi.com.tw", subject, body, mail_path):
+                    status_var.set("已寄送 Outlook 郵件")
+            else:
+                status_var.set("找不到郵件附件，無法寄送 Outlook 郵件")
 
     def format_date_range(start_date: str, end_date: str) -> str:
         if start_date == end_date:
@@ -386,6 +417,26 @@ def build_ui() -> tk.Tk:
         set_loading(True)
         check_process()
 
+    def send_outlook_email(recipient: str, subject: str, body: str, attachment_path: str | None) -> bool:
+        if importlib.util.find_spec("win32com.client") is None:
+            status_var.set("未安裝 Outlook 控制模組，無法寄送郵件")
+            return False
+        import win32com.client  # pylint: disable=import-error
+
+        try:
+            outlook = win32com.client.Dispatch("Outlook.Application")
+            mail = outlook.CreateItem(0)
+            mail.To = recipient
+            mail.Subject = subject
+            mail.Body = body
+            if attachment_path:
+                mail.Attachments.Add(attachment_path)
+            mail.Send()
+            return True
+        except Exception as exc:
+            status_var.set(f"Outlook 寄信失敗: {exc}")
+            return False
+
     def run_trx_test() -> None:
         output_dir = resolve_output_dir()
         if not output_dir:
@@ -432,7 +483,7 @@ def build_ui() -> tk.Tk:
         return candidate
 
     def schedule_combined_report() -> None:
-        nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
+        nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir, pending_mail, pending_mail_path
         if running_process is not None:
             status_var.set("查詢中，請稍候…")
             return
@@ -463,13 +514,16 @@ def build_ui() -> tk.Tk:
 
         delay_ms = int((scheduled_at - datetime.datetime.now()).total_seconds() * 1000)
         def run_scheduled() -> None:
-            nonlocal scheduled_job_id, scheduled_output_path
+            nonlocal scheduled_job_id, scheduled_output_path, pending_mail, pending_mail_path
             scheduled_job_id = None
             if daily_schedule_var.get() and scheduled_output_dir:
                 scheduled_output_path = build_combined_default_output_path(scheduled_output_dir)
             if not scheduled_output_path:
                 status_var.set("找不到排程輸出路徑")
                 return
+            if mail_schedule_var.get():
+                pending_mail = True
+                pending_mail_path = scheduled_output_path
             run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", scheduled_output_path])
             if daily_schedule_var.get():
                 next_run = next_daily_run(schedule_time)
