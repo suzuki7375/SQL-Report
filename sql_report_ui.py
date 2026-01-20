@@ -251,28 +251,35 @@ def build_ui() -> tk.Tk:
     date_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     date_frame.pack(fill="x", pady=(0, 12))
 
-    ttk.Label(date_frame, text="日期", style="Title.TLabel").pack(side="left")
+    date_frame.columnconfigure(7, weight=1)
+
+    ttk.Label(date_frame, text="日期", style="Title.TLabel").grid(row=0, column=0, sticky="w")
 
     now = datetime.datetime.now()
     today = now.date()
     start_picker = DatePicker(date_frame, today)
-    start_picker.pack(side="left", padx=(12, 8))
+    start_picker.grid(row=0, column=1, padx=(12, 8), sticky="w")
 
-    ttk.Label(date_frame, text="~", style="Title.TLabel").pack(side="left")
+    ttk.Label(date_frame, text="起始時間", style="Title.TLabel").grid(row=0, column=2, sticky="w")
+    start_time_var = tk.StringVar(value="00:00")
+    start_time_entry = ttk.Entry(date_frame, textvariable=start_time_var, width=6)
+    start_time_entry.grid(row=0, column=3, padx=(6, 12), sticky="w")
+
+    ttk.Label(date_frame, text="~", style="Title.TLabel").grid(row=0, column=4, sticky="w")
     end_picker = DatePicker(date_frame, today)
-    end_picker.pack(side="left", padx=(8, 0))
+    end_picker.grid(row=0, column=5, padx=(8, 0), sticky="w")
 
     output_dir_label = ttk.Label(date_frame, text="輸出資料夾", style="Title.TLabel")
-    output_dir_label.pack(side="left", padx=(16, 6))
+    output_dir_label.grid(row=0, column=6, padx=(16, 6), sticky="w")
     output_dir_entry = ttk.Entry(date_frame, textvariable=output_dir_var, width=28, state="readonly")
-    output_dir_entry.pack(side="left", padx=(0, 6))
+    output_dir_entry.grid(row=0, column=7, padx=(0, 6), sticky="ew")
     output_dir_button = ttk.Button(
         date_frame,
         text="選擇",
         style="Secondary.TButton",
         command=select_output_dir,
     )
-    output_dir_button.pack(side="left")
+    output_dir_button.grid(row=0, column=8, sticky="w")
 
     status_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     status_frame.pack(fill="x")
@@ -299,6 +306,10 @@ def build_ui() -> tk.Tk:
         justify="left",
     )
     schedule_hint.pack(anchor="w", pady=(6, 0))
+    def update_wraplength(event: tk.Event) -> None:
+        schedule_hint.configure(wraplength=max(200, event.width - 48))
+
+    content_frame.bind("<Configure>", update_wraplength)
 
     time_var = tk.StringVar(value=now.strftime("%H:%M"))
     time_entry = ttk.Entry(schedule_controls, textvariable=time_var, width=8)
@@ -339,14 +350,17 @@ def build_ui() -> tk.Tk:
         running_process = None
         set_loading(False)
 
-    def format_date_range(start_date: str, end_date: str) -> str:
+    def format_date_range(start_date: str, end_date: str, start_time: str) -> str:
+        time_suffix = ""
+        if start_time and start_time != "00:00":
+            time_suffix = f"_{start_time.replace(':', '')}"
         if start_date == end_date:
-            return start_date
-        return f"{start_date}_{end_date}"
+            return f"{start_date}{time_suffix}"
+        return f"{start_date}{time_suffix}_{end_date}"
 
     def build_combined_default_output_path(output_dir: str | None = None) -> str:
         base_name = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
-        date_range = format_date_range(start_picker.value, end_picker.value)
+        date_range = format_date_range(start_picker.value, end_picker.value, start_time_var.get().strip())
         filename = f"{base_name}_{date_range}.xlsx"
         target_dir = output_dir or get_base_dir()
         return os.path.join(target_dir, filename)
@@ -369,7 +383,14 @@ def build_ui() -> tk.Tk:
         if running_process is not None:
             return
         base_dir = get_base_dir()
-        args = ["--start-date", start_picker.value, "--end-date", end_picker.value]
+        args = [
+            "--start-date",
+            start_picker.value,
+            "--start-time",
+            start_time_var.get().strip(),
+            "--end-date",
+            end_picker.value,
+        ]
         if extra_args:
             args.extend(extra_args)
         if is_frozen():
