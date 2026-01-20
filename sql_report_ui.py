@@ -418,7 +418,11 @@ def build_ui() -> tk.Tk:
         check_process()
 
     def send_outlook_email(recipient: str, subject: str, body: str, attachment_path: str | None) -> bool:
-        if importlib.util.find_spec("win32com.client") is None:
+        try:
+            has_win32com = importlib.util.find_spec("win32com.client") is not None
+        except ModuleNotFoundError:
+            has_win32com = False
+        if not has_win32com:
             status_var.set("未安裝 Outlook 控制模組，無法寄送郵件")
             return False
         import win32com.client  # pylint: disable=import-error
