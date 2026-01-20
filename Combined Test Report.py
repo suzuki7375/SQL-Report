@@ -559,6 +559,18 @@ def populate_equipment_performance_section(
     chart_columns = [8, 16, 24, 32]
     chart_height_rows = 15
 
+    def configure_chart_axes(chart: LineChart, x_title: str, y_title: str) -> None:
+        chart.x_axis.title = x_title
+        chart.y_axis.title = y_title
+        chart.x_axis.tickLblPos = "low"
+        chart.y_axis.tickLblPos = "nextTo"
+        chart.x_axis.majorTickMark = "out"
+        chart.y_axis.majorTickMark = "out"
+        chart.x_axis.minorTickMark = "none"
+        chart.y_axis.minorTickMark = "none"
+        chart.x_axis.delete = False
+        chart.y_axis.delete = False
+
     for station in station_names:
         station_summary = section_df[section_df[STATION_NAME_HEADER] == station].copy()
         if group_with_location:
@@ -616,8 +628,7 @@ def populate_equipment_performance_section(
             )
             chart = LineChart()
             chart.title = f"{station} {item}"
-            chart.y_axis.title = item
-            chart.x_axis.title = header_label
+            configure_chart_axes(chart, header_label, item)
             chart.add_data(data_ref, titles_from_data=True)
             chart.set_categories(categories_ref)
             chart.height = 7
