@@ -24,6 +24,7 @@ ERROR_CODE_HEADER_DEFAULT = "Error code"
 STATION_NAME_HEADER = "STATION NAME"
 ERROR_CODE_CANONICAL_HEADER = "Error Code"
 EQUIPMENT_PERFORMANCE_SHEET = "Equipment Performance"
+EQUIPMENT_PERFORMANCE_DATA_SHEET = "Equipment Performance Data"
 EQUIPMENT_PERFORMANCE_DDMI_ITEMS = [
     "Power(dBm)",
     "Rxp_Slope",
@@ -502,24 +503,26 @@ def _add_location_column(df: pd.DataFrame, location_column: str | None) -> pd.Da
 
 
 def populate_equipment_performance_section(
-    ws,
+    data_ws,
+    chart_ws,
     df: pd.DataFrame,
     categories: list[str],
     items: list[str],
-    start_row: int,
+    data_start_row: int,
+    chart_start_row: int,
     section_title: str,
     group_with_location: bool = False,
     sort_columns: list[str] | None = None,
-) -> int:
+) -> tuple[int, int]:
     section_df = df[df["_category"].isin(categories)].copy()
     if section_df.empty:
         print(f"⚠️ {section_title} 無資料，Equipment Performance 將跳過")
-        return start_row
+        return data_start_row, chart_start_row
 
     equipment_column = find_equipment_column(list(section_df.columns))
     if not equipment_column:
         print(f"⚠️ {section_title} 找不到 Equipment 欄位，Equipment Performance 將跳過")
-        return start_row
+        return data_start_row, chart_start_row
 
     if group_with_location and "Location" not in section_df.columns:
         section_df["Location"] = ""
@@ -532,7 +535,7 @@ def populate_equipment_performance_section(
     station_names = _build_station_name_order(section_df[STATION_NAME_HEADER])
     if not station_names:
         print(f"⚠️ {section_title} Station Name 無有效資料，Equipment Performance 將跳過")
-        return start_row
+        return data_start_row, chart_start_row
 
     rename_map: dict[str, str] = {}
     for item in items:
@@ -549,8 +552,10 @@ def populate_equipment_performance_section(
 
     sort_columns = [col for col in (sort_columns or []) if col in section_df.columns]
 
-    ws.cell(row=start_row, column=1, value=section_title)
-    block_start_row = start_row + 1
+    data_ws.cell(row=data_start_row, column=1, value=section_title)
+    chart_ws.cell(row=chart_start_row, column=1, value=section_title)
+    data_block_start_row = data_start_row + 1
+    chart_block_start_row = chart_start_row + 1
     chart_columns = [8, 16, 24, 32]
     chart_height_rows = 15
 
@@ -581,21 +586,21 @@ def populate_equipment_performance_section(
         data_columns = [display_column, *items]
         station_summary = station_summary[data_columns]
 
-        title_row = block_start_row
-        header_row = block_start_row + 1
-        data_row_start = block_start_row + 2
+        title_row = data_block_start_row
+        header_row = data_block_start_row + 1
+        data_row_start = data_block_start_row + 2
 
-        ws.cell(row=title_row, column=1, value=station)
-        ws.cell(row=header_row, column=1, value=header_label)
+        data_ws.cell(row=title_row, column=1, value=station)
+        data_ws.cell(row=header_row, column=1, value=header_label)
         for idx, item in enumerate(items, start=2):
-            ws.cell(row=header_row, column=idx, value=item)
+            data_ws.cell(row=header_row, column=idx, value=item)
 
         for row_offset, row in enumerate(station_summary.itertuples(index=False), start=0):
             for col_offset, value in enumerate(row, start=1):
-                ws.cell(row=data_row_start + row_offset, column=col_offset, value=value)
+                data_ws.cell(row=data_row_start + row_offset, column=col_offset, value=value)
 
         data_row_end = data_row_start + len(station_summary) - 1
-        categories_ref = Reference(ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+        categories_ref = Reference(data_ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
 
         chart_col_index = 0
         for item_index, item in enumerate(items):
@@ -604,7 +609,7 @@ def populate_equipment_performance_section(
             if chart_col_index >= len(chart_columns):
                 break
             data_ref = Reference(
-                ws,
+                data_ws,
                 min_col=item_index + 2,
                 min_row=header_row,
                 max_row=data_row_end,
@@ -618,14 +623,14 @@ def populate_equipment_performance_section(
             chart.height = 7
             chart.width = 14
             anchor_col = get_column_letter(chart_columns[chart_col_index])
-            ws.add_chart(chart, f"{anchor_col}{title_row}")
+            chart_ws.add_chart(chart, f"{anchor_col}{chart_block_start_row}")
             chart_col_index += 1
 
         table_height = len(station_summary) + 2
-        block_height = max(table_height, chart_height_rows if chart_col_index else table_height) + 3
-        block_start_row += block_height
+        data_block_start_row += table_height + 3
+        chart_block_start_row += (chart_height_rows if chart_col_index else table_height) + 3
 
-    return block_start_row + 1
+    return data_block_start_row + 1, chart_block_start_row + 1
 
 
 def _compute_group_fpy(
@@ -1034,37 +1039,47 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
     if hasattr(module, "determine_sort_columns"):
         sort_columns = module.determine_sort_columns(df)
 
-    if EQUIPMENT_PERFORMANCE_SHEET in workbook.sheetnames:
-        workbook.remove(workbook[EQUIPMENT_PERFORMANCE_SHEET])
-    ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
+    for sheet_name in [EQUIPMENT_PERFORMANCE_SHEET, EQUIPMENT_PERFORMANCE_DATA_SHEET]:
+        if sheet_name in workbook.sheetnames:
+            workbook.remove(workbook[sheet_name])
+    data_ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_DATA_SHEET)
+    data_ws.sheet_state = "hidden"
+    chart_ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
 
-    next_row = 1
-    next_row = populate_equipment_performance_section(
-        ws,
+    data_next_row = 1
+    chart_next_row = 1
+    data_next_row, chart_next_row = populate_equipment_performance_section(
+        data_ws,
+        chart_ws,
         df,
         categories=["DDMI"],
         items=EQUIPMENT_PERFORMANCE_DDMI_ITEMS,
-        start_row=next_row,
+        data_start_row=data_next_row,
+        chart_start_row=chart_next_row,
         section_title="800G_TRX DDMI",
         group_with_location=False,
         sort_columns=sort_columns,
     )
-    next_row = populate_equipment_performance_section(
-        ws,
+    data_next_row, chart_next_row = populate_equipment_performance_section(
+        data_ws,
+        chart_ws,
         df,
         categories=["ATS"],
         items=EQUIPMENT_PERFORMANCE_ATS_ITEMS,
-        start_row=next_row,
+        data_start_row=data_next_row,
+        chart_start_row=chart_next_row,
         section_title="800G_TRX ATS",
         group_with_location=False,
         sort_columns=sort_columns,
     )
     populate_equipment_performance_section(
-        ws,
+        data_ws,
+        chart_ws,
         df,
         categories=["LT", "HT", "RT"],
         items=EQUIPMENT_PERFORMANCE_TH_ITEMS,
-        start_row=next_row,
+        data_start_row=data_next_row,
+        chart_start_row=chart_next_row,
         section_title="800G_TRX LT/HT/RT",
         group_with_location=True,
         sort_columns=sort_columns,
@@ -1132,6 +1147,7 @@ def main() -> None:
         move_sheet_after(workbook, EQUIPMENT_STATUS_SHEET, DATA_ANALYSIS_SHEET)
         move_sheet_after(workbook, EQUIPMENT_PERFORMANCE_SHEET, EQUIPMENT_STATUS_SHEET)
         hide_sheet(workbook, "Error Code")
+        hide_sheet(workbook, EQUIPMENT_PERFORMANCE_DATA_SHEET)
         hide_sheet(workbook, "800G_TRX 其他")
         hide_sheet(workbook, "800G_Fixed_BER 其他")
         hide_sheet(workbook, "BER_Symbol_Error 其他")
