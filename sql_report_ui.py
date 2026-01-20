@@ -304,24 +304,7 @@ def build_ui() -> tk.Tk:
     progress = ttk.Progressbar(status_frame, mode="indeterminate")
     progress.pack(side="right", fill="x", expand=True, padx=(16, 0))
 
-    mail_settings_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
-    mail_settings_frame.pack(fill="x", pady=(12, 0))
-
-    ttk.Label(mail_settings_frame, text="Mail 設定", style="Title.TLabel").pack(anchor="w")
-
-    mail_settings_grid = ttk.Frame(mail_settings_frame, style="Card.TFrame")
-    mail_settings_grid.pack(fill="x", pady=(8, 0))
-
     recipient_var = tk.StringVar(value=DEFAULT_MAIL_RECIPIENT)
-
-    ttk.Label(mail_settings_grid, text="登入資訊已隱藏", style="Sub.TLabel").grid(
-        row=0, column=0, sticky="w", padx=(0, 8)
-    )
-
-    ttk.Label(mail_settings_grid, text="收件者", style="Sub.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(mail_settings_grid, textvariable=recipient_var, width=40, state="readonly").grid(
-        row=1, column=1, sticky="w", pady=(6, 0)
-    )
 
     schedule_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     schedule_frame.pack(fill="x", pady=(16, 0))
@@ -346,16 +329,10 @@ def build_ui() -> tk.Tk:
     daily_schedule_var = tk.BooleanVar(value=False)
     mail_schedule_var = tk.BooleanVar(value=False)
 
-    def sync_mail_with_daily() -> None:
-        is_daily = daily_schedule_var.get()
-        mail_schedule_var.set(is_daily)
-        mail_checkbutton.configure(state="normal" if is_daily else "disabled")
-
     daily_checkbutton = ttk.Checkbutton(
         schedule_controls,
         text="每日",
         variable=daily_schedule_var,
-        command=sync_mail_with_daily,
     )
     daily_checkbutton.pack(side="left", padx=(0, 12))
 
@@ -363,10 +340,8 @@ def build_ui() -> tk.Tk:
         schedule_controls,
         text="Mail",
         variable=mail_schedule_var,
-        state="disabled",
     )
     mail_checkbutton.pack(side="left", padx=(0, 12))
-    sync_mail_with_daily()
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
@@ -514,10 +489,14 @@ def build_ui() -> tk.Tk:
         run_report(BER_SYMBOL_ERROR_SCRIPT_NAME, ["--output-dir", output_dir])
 
     def run_combined_report() -> None:
+        nonlocal pending_mail, pending_mail_path
         output_dir = resolve_output_dir()
         if not output_dir:
             return
         output_path = build_unique_combined_output_path(output_dir)
+        if mail_schedule_var.get():
+            pending_mail = True
+            pending_mail_path = output_path
         run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
 
     def cancel_schedule() -> None:
