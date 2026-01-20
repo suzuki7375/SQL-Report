@@ -169,6 +169,10 @@ def build_ui() -> tk.Tk:
     root = tk.Tk()
     root.title("800G 2FR4 SQL DATA")
     root.geometry("980x700")
+    try:
+        root.state("zoomed")
+    except tk.TclError:
+        root.attributes("-zoomed", True)
     root.configure(bg="#f7f7fb")
 
     style = ttk.Style(root)
@@ -307,12 +311,6 @@ def build_ui() -> tk.Tk:
         variable=daily_schedule_var,
     )
     daily_checkbutton.pack(side="left", padx=(0, 12))
-
-    buttons_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(10, 10))
-    buttons_frame.pack(fill="x", pady=(16, 0))
-
-    buttons_frame.columnconfigure((0, 1), weight=1, uniform="button")
-    buttons_frame.rowconfigure((0, 1), weight=0)
 
     button_refs: list[ttk.Button] = []
     running_process: subprocess.Popen | None = None
@@ -488,33 +486,6 @@ def build_ui() -> tk.Tk:
         else:
             status_var.set(f"已排程 {scheduled_at:%Y-%m-%d %H:%M} 執行 Combined Report")
 
-    main_button = ttk.Button(
-        buttons_frame,
-        text=BUTTON_LABEL,
-        command=run_trx_test,
-        style="Primary.TButton",
-    )
-    main_button.grid(row=0, column=0, padx=8, pady=6, sticky="nsew")
-    button_refs.append(main_button)
-
-    fixed_ber_button = ttk.Button(
-        buttons_frame,
-        text=FIXED_BER_BUTTON_LABEL,
-        command=run_fixed_ber_test,
-        style="Primary.TButton",
-    )
-    fixed_ber_button.grid(row=0, column=1, padx=8, pady=6, sticky="nsew")
-    button_refs.append(fixed_ber_button)
-
-    symbol_error_button = ttk.Button(
-        buttons_frame,
-        text=BER_SYMBOL_ERROR_BUTTON_LABEL,
-        command=run_ber_symbol_error_test,
-        style="Primary.TButton",
-    )
-    symbol_error_button.grid(row=1, column=0, padx=8, pady=6, sticky="nsew")
-    button_refs.append(symbol_error_button)
-
     schedule_button = ttk.Button(
         schedule_controls,
         text="排程執行",
@@ -532,12 +503,12 @@ def build_ui() -> tk.Tk:
     cancel_schedule_button.pack(side="left")
 
     combined_report_button = ttk.Button(
-        buttons_frame,
+        schedule_controls,
         text=COMBINED_REPORT_BUTTON_LABEL,
         command=run_combined_report,
         style="Primary.TButton",
     )
-    combined_report_button.grid(row=1, column=1, padx=8, pady=6, sticky="nsew")
+    combined_report_button.pack(side="left", padx=(12, 0))
     button_refs.append(combined_report_button)
     button_refs.extend([schedule_button, cancel_schedule_button])
 
