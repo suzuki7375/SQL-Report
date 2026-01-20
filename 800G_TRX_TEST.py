@@ -46,6 +46,7 @@ ERROR_CODE_HEADER = "Error code"
 FAILURE_CODE_HEADER = "FailureCodeID"
 PARETO_COLUMNS = ["Error Code", "Fail Q'ty", "Failed Rate", "Cum%"]
 EQUIPMENT_PERFORMANCE_SHEET = "Equipment Performance"
+EQUIPMENT_PERFORMANCE_DATA_SHEET = "Equipment Performance Data"
 EQUIPMENT_PERFORMANCE_ITEMS = [
     "Power(dBm)",
     "Rxp_Slope",
@@ -971,13 +972,17 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
         .reset_index()
     )
 
-    if EQUIPMENT_PERFORMANCE_SHEET in workbook.sheetnames:
-        workbook.remove(workbook[EQUIPMENT_PERFORMANCE_SHEET])
-    ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
+    for sheet_name in [EQUIPMENT_PERFORMANCE_SHEET, EQUIPMENT_PERFORMANCE_DATA_SHEET]:
+        if sheet_name in workbook.sheetnames:
+            workbook.remove(workbook[sheet_name])
+    data_ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_DATA_SHEET)
+    data_ws.sheet_state = "hidden"
+    chart_ws = workbook.create_sheet(EQUIPMENT_PERFORMANCE_SHEET)
 
     chart_columns = [8, 16, 24, 32]
-    block_start_row = 1
     chart_height_rows = 15
+    data_block_start_row = 1
+    chart_block_start_row = 1
 
     for station in station_names:
         station_summary = summary[summary[station_column] == station].copy()
@@ -987,14 +992,14 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
                 [{equipment_column: "", **{item: np.nan for item in EQUIPMENT_PERFORMANCE_ITEMS}}]
             )
 
-        title_row = block_start_row
-        header_row = block_start_row + 1
-        data_row_start = block_start_row + 2
+        title_row = data_block_start_row
+        header_row = data_block_start_row + 1
+        data_row_start = data_block_start_row + 2
 
-        ws.cell(row=title_row, column=1, value=station)
-        ws.cell(row=header_row, column=1, value="Equipment")
+        data_ws.cell(row=title_row, column=1, value=station)
+        data_ws.cell(row=header_row, column=1, value="Equipment")
         for idx, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS, start=2):
-            ws.cell(row=header_row, column=idx, value=item)
+            data_ws.cell(row=header_row, column=idx, value=item)
 
         equipment_index = station_summary.columns.get_loc(equipment_column)
         item_indexes = {
@@ -1003,24 +1008,24 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
         }
 
         for row_offset, row in enumerate(station_summary.itertuples(index=False), start=0):
-            ws.cell(
+            data_ws.cell(
                 row=data_row_start + row_offset,
                 column=1,
                 value=row[equipment_index],
             )
             for item_index, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS, start=2):
-                ws.cell(
+                data_ws.cell(
                     row=data_row_start + row_offset,
                     column=item_index,
                     value=row[item_indexes[item]],
                 )
 
         data_row_end = data_row_start + len(station_summary) - 1
-        categories = Reference(ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+        categories = Reference(data_ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
 
         for item_index, item in enumerate(EQUIPMENT_PERFORMANCE_ITEMS):
             data_ref = Reference(
-                ws,
+                data_ws,
                 min_col=item_index + 2,
                 min_row=header_row,
                 max_row=data_row_end,
@@ -1034,11 +1039,11 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
             chart.height = 7
             chart.width = 14
             anchor_col = get_column_letter(chart_columns[item_index])
-            ws.add_chart(chart, f"{anchor_col}{title_row}")
+            chart_ws.add_chart(chart, f"{anchor_col}{chart_block_start_row}")
 
         table_height = len(station_summary) + 2
-        block_height = max(table_height, chart_height_rows) + 3
-        block_start_row += block_height
+        data_block_start_row += table_height + 3
+        chart_block_start_row += chart_height_rows + 3
 
 
 def main():
