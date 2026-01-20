@@ -3,12 +3,14 @@
 import argparse
 import calendar
 import datetime
-import importlib.util
+import mimetypes
 import os
 import runpy
+import smtplib
 import subprocess
 import sys
 import tkinter as tk
+from email.message import EmailMessage
 from tkinter import filedialog, ttk
 
 
@@ -21,24 +23,11 @@ BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
-MAIL_AUTH_URL = (
-    "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?"
-    "client_id=9199bf20-a13f-4107-85dc-02114787ef48&"
-    "scope=https%3A%2F%2Foutlook.office.com%2F.default%20openid%20profile%20offline_access&"
-    "redirect_uri=https%3A%2F%2Foutlook.office365.com%2Fmail%2F&"
-    "client-request-id=92bd18f2-d733-c8f3-576b-32c50d6f3a3e&"
-    "response_mode=fragment&client_info=1&domain_hint=aoi.com.tw&"
-    "nonce=019bda26-8fb8-71f5-9b94-1a7ced002f98&"
-    "state=eyJpZCI6IjAxOWJkYTI2LThmYjgtNzk0ZC05ZTM1LWI1ZTZkYTE0ODUzNyIsIm1ldGEiOnsiaW50ZXJhY3Rpb25UeXBlIjoicmVkaXJlY3QifX0%3D%7C"
-    "aHR0cHM6Ly9vdXRsb29rLm9mZmljZTM2NS5jb20vbWFpbC8&"
-    "claims=%7B%22access_token%22%3A%7B%22xms_cc%22%3A%7B%22values%22%3A%5B%22CP1%22%5D%7D%7D%7D&"
-    "x-client-SKU=msal.js.browser&x-client-VER=4.26.0&"
-    "response_type=code&code_challenge=wxvyZ4mn7Lug65iMhzK8q-0T4k2asKVGRmDSKQu1n3I&"
-    "code_challenge_method=S256"
-)
 DEFAULT_LOGIN_ACCOUNT = "xiang_lin@aoi.com.tw"
 DEFAULT_LOGIN_PASSWORD = "33eeddcC"
 DEFAULT_MAIL_RECIPIENT = "xiang_lin@aoi.com.tw"
+OUTLOOK_SMTP_HOST = "smtp.office365.com"
+OUTLOOK_SMTP_PORT = 587
 
 
 def is_frozen() -> bool:
@@ -448,23 +437,31 @@ def build_ui() -> tk.Tk:
 
     def send_outlook_email(recipient: str, subject: str, body: str, attachment_path: str | None) -> bool:
         try:
-            has_win32com = importlib.util.find_spec("win32com.client") is not None
-        except ModuleNotFoundError:
-            has_win32com = False
-        if not has_win32com:
-            status_var.set("未安裝 Outlook 控制模組，無法寄送郵件")
-            return False
-        import win32com.client  # pylint: disable=import-error
-
-        try:
-            outlook = win32com.client.Dispatch("Outlook.Application")
-            mail = outlook.CreateItem(0)
-            mail.To = recipient
-            mail.Subject = subject
-            mail.Body = body
+            message = EmailMessage()
+            message["Subject"] = subject
+            message["From"] = DEFAULT_LOGIN_ACCOUNT
+            message["To"] = recipient
+            message.set_content(body)
             if attachment_path:
-                mail.Attachments.Add(attachment_path)
-            mail.Send()
+                mime_type, _ = mimetypes.guess_type(attachment_path)
+                if mime_type:
+                    maintype, subtype = mime_type.split("/", 1)
+                else:
+                    maintype, subtype = "application", "octet-stream"
+                with open(attachment_path, "rb") as attachment:
+                    message.add_attachment(
+                        attachment.read(),
+                        maintype=maintype,
+                        subtype=subtype,
+                        filename=os.path.basename(attachment_path),
+                    )
+
+            with smtplib.SMTP(OUTLOOK_SMTP_HOST, OUTLOOK_SMTP_PORT) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(DEFAULT_LOGIN_ACCOUNT, DEFAULT_LOGIN_PASSWORD)
+                server.send_message(message)
             return True
         except Exception as exc:
             status_var.set(f"Outlook 寄信失敗: {exc}")
