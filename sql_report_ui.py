@@ -20,6 +20,24 @@ BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
 COMBINED_REPORT_BUTTON_LABEL = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
+MAIL_AUTH_URL = (
+    "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?"
+    "client_id=9199bf20-a13f-4107-85dc-02114787ef48&"
+    "scope=https%3A%2F%2Foutlook.office.com%2F.default%20openid%20profile%20offline_access&"
+    "redirect_uri=https%3A%2F%2Foutlook.office365.com%2Fmail%2F&"
+    "client-request-id=92bd18f2-d733-c8f3-576b-32c50d6f3a3e&"
+    "response_mode=fragment&client_info=1&domain_hint=aoi.com.tw&"
+    "nonce=019bda26-8fb8-71f5-9b94-1a7ced002f98&"
+    "state=eyJpZCI6IjAxOWJkYTI2LThmYjgtNzk0ZC05ZTM1LWI1ZTZkYTE0ODUzNyIsIm1ldGEiOnsiaW50ZXJhY3Rpb25UeXBlIjoicmVkaXJlY3QifX0%3D%7C"
+    "aHR0cHM6Ly9vdXRsb29rLm9mZmljZTM2NS5jb20vbWFpbC8&"
+    "claims=%7B%22access_token%22%3A%7B%22xms_cc%22%3A%7B%22values%22%3A%5B%22CP1%22%5D%7D%7D%7D&"
+    "x-client-SKU=msal.js.browser&x-client-VER=4.26.0&"
+    "response_type=code&code_challenge=wxvyZ4mn7Lug65iMhzK8q-0T4k2asKVGRmDSKQu1n3I&"
+    "code_challenge_method=S256"
+)
+DEFAULT_LOGIN_ACCOUNT = "xiang_lin@aoi.com.tw"
+DEFAULT_LOGIN_PASSWORD = "33eeddcC"
+DEFAULT_MAIL_RECIPIENT = "xiang_lin@aoi.com.tw"
 
 
 def is_frozen() -> bool:
@@ -285,6 +303,39 @@ def build_ui() -> tk.Tk:
     progress = ttk.Progressbar(status_frame, mode="indeterminate")
     progress.pack(side="right", fill="x", expand=True, padx=(16, 0))
 
+    mail_settings_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
+    mail_settings_frame.pack(fill="x", pady=(12, 0))
+
+    ttk.Label(mail_settings_frame, text="Mail 登入資訊", style="Title.TLabel").pack(anchor="w")
+
+    mail_settings_grid = ttk.Frame(mail_settings_frame, style="Card.TFrame")
+    mail_settings_grid.pack(fill="x", pady=(8, 0))
+
+    login_account_var = tk.StringVar(value=DEFAULT_LOGIN_ACCOUNT)
+    login_password_var = tk.StringVar(value=DEFAULT_LOGIN_PASSWORD)
+    recipient_var = tk.StringVar(value=DEFAULT_MAIL_RECIPIENT)
+    auth_url_var = tk.StringVar(value=MAIL_AUTH_URL)
+
+    ttk.Label(mail_settings_grid, text="登入帳號", style="Sub.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+    ttk.Entry(mail_settings_grid, textvariable=login_account_var, width=40, state="readonly").grid(
+        row=0, column=1, sticky="w"
+    )
+
+    ttk.Label(mail_settings_grid, text="密碼", style="Sub.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+    ttk.Entry(mail_settings_grid, textvariable=login_password_var, width=40, state="readonly").grid(
+        row=1, column=1, sticky="w", pady=(6, 0)
+    )
+
+    ttk.Label(mail_settings_grid, text="收件者", style="Sub.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+    ttk.Entry(mail_settings_grid, textvariable=recipient_var, width=40).grid(
+        row=2, column=1, sticky="w", pady=(6, 0)
+    )
+
+    ttk.Label(mail_settings_grid, text="授權網址", style="Sub.TLabel").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(6, 0))
+    ttk.Entry(mail_settings_grid, textvariable=auth_url_var, width=120).grid(
+        row=3, column=1, sticky="w", pady=(6, 0)
+    )
+
     schedule_frame = ttk.Frame(content_frame, style="Card.TFrame", padding=(12, 10))
     schedule_frame.pack(fill="x", pady=(16, 0))
 
@@ -365,7 +416,8 @@ def build_ui() -> tk.Tk:
             if mail_path and os.path.isfile(mail_path):
                 subject = f"Combined Report {format_date_range(start_picker.value, end_picker.value)}"
                 body = "請參考附件 Combined Report。"
-                if send_outlook_email("Xiang_lin@aoi.com.tw", subject, body, mail_path):
+                recipient = recipient_var.get().strip() or DEFAULT_MAIL_RECIPIENT
+                if send_outlook_email(recipient, subject, body, mail_path):
                     status_var.set("已寄送 Outlook 郵件")
             else:
                 status_var.set("找不到郵件附件，無法寄送 Outlook 郵件")
