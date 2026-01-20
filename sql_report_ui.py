@@ -317,22 +317,34 @@ def build_ui() -> tk.Tk:
     auth_url_var = tk.StringVar(value=MAIL_AUTH_URL)
 
     ttk.Label(mail_settings_grid, text="登入帳號", style="Sub.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-    ttk.Entry(mail_settings_grid, textvariable=login_account_var, width=40, state="readonly").grid(
+    ttk.Entry(
+        mail_settings_grid,
+        textvariable=login_account_var,
+        width=40,
+        state="readonly",
+        show="•",
+    ).grid(
         row=0, column=1, sticky="w"
     )
 
     ttk.Label(mail_settings_grid, text="密碼", style="Sub.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(mail_settings_grid, textvariable=login_password_var, width=40, state="readonly").grid(
+    ttk.Entry(
+        mail_settings_grid,
+        textvariable=login_password_var,
+        width=40,
+        state="readonly",
+        show="•",
+    ).grid(
         row=1, column=1, sticky="w", pady=(6, 0)
     )
 
     ttk.Label(mail_settings_grid, text="收件者", style="Sub.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(mail_settings_grid, textvariable=recipient_var, width=40).grid(
+    ttk.Entry(mail_settings_grid, textvariable=recipient_var, width=40, state="readonly").grid(
         row=2, column=1, sticky="w", pady=(6, 0)
     )
 
     ttk.Label(mail_settings_grid, text="授權網址", style="Sub.TLabel").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(6, 0))
-    ttk.Entry(mail_settings_grid, textvariable=auth_url_var, width=120).grid(
+    ttk.Entry(mail_settings_grid, textvariable=auth_url_var, width=120, state="readonly").grid(
         row=3, column=1, sticky="w", pady=(6, 0)
     )
 
