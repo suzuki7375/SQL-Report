@@ -16,6 +16,7 @@ SCRIPT_NAME = "800G_TRX_TEST.py"
 FIXED_BER_SCRIPT_NAME = "800G_Fixed_BER_Test.py"
 BER_SYMBOL_ERROR_SCRIPT_NAME = "BER_Symbol_Error_Test.py"
 COMBINED_REPORT_SCRIPT_NAME = "Combined Test Report.py"
+COMBINED_REPORT_EXTENSION = ".xlsx"
 BUTTON_LABEL = os.path.splitext(SCRIPT_NAME)[0]
 FIXED_BER_BUTTON_LABEL = os.path.splitext(FIXED_BER_SCRIPT_NAME)[0]
 BER_SYMBOL_ERROR_BUTTON_LABEL = os.path.splitext(BER_SYMBOL_ERROR_SCRIPT_NAME)[0]
@@ -442,9 +443,24 @@ def build_ui() -> tk.Tk:
     def build_combined_default_output_path(output_dir: str | None = None) -> str:
         base_name = os.path.splitext(COMBINED_REPORT_SCRIPT_NAME)[0]
         date_range = format_date_range(start_picker.value, end_picker.value)
-        filename = f"{base_name}_{date_range}.xlsx"
+        filename = f"{base_name}_{date_range}{COMBINED_REPORT_EXTENSION}"
         target_dir = output_dir or get_base_dir()
         return os.path.join(target_dir, filename)
+
+    def ensure_unique_output_path(path: str) -> str:
+        if not os.path.exists(path):
+            return path
+        root, ext = os.path.splitext(path)
+        counter = 1
+        while True:
+            candidate = f"{root}_{counter}{ext}"
+            if not os.path.exists(candidate):
+                return candidate
+            counter += 1
+
+    def build_unique_combined_output_path(output_dir: str | None = None) -> str:
+        output_path = build_combined_default_output_path(output_dir)
+        return ensure_unique_output_path(output_path)
 
     def resolve_output_dir() -> str | None:
         output_dir = output_dir_var.get().strip() or default_output_dir()
@@ -527,7 +543,8 @@ def build_ui() -> tk.Tk:
         output_dir = resolve_output_dir()
         if not output_dir:
             return
-        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_dir])
+        output_path = build_unique_combined_output_path(output_dir)
+        run_report(COMBINED_REPORT_SCRIPT_NAME, ["--output-path", output_path])
 
     def cancel_schedule() -> None:
         nonlocal scheduled_job_id, scheduled_output_path, scheduled_output_dir
@@ -560,7 +577,7 @@ def build_ui() -> tk.Tk:
         if not output_dir:
             return
         scheduled_output_dir = output_dir
-        scheduled_output_path = build_combined_default_output_path(output_dir)
+        scheduled_output_path = build_unique_combined_output_path(output_dir)
 
         try:
             schedule_time = datetime.datetime.strptime(time_var.get().strip(), "%H:%M").time()
@@ -585,7 +602,7 @@ def build_ui() -> tk.Tk:
             nonlocal scheduled_job_id, scheduled_output_path, pending_mail, pending_mail_path
             scheduled_job_id = None
             if daily_schedule_var.get() and scheduled_output_dir:
-                scheduled_output_path = build_combined_default_output_path(scheduled_output_dir)
+                scheduled_output_path = build_unique_combined_output_path(scheduled_output_dir)
             if not scheduled_output_path:
                 status_var.set("找不到排程輸出路徑")
                 return
