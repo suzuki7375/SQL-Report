@@ -984,6 +984,18 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
     data_block_start_row = 1
     chart_block_start_row = 1
 
+    def configure_chart_axes(chart: LineChart, x_title: str, y_title: str) -> None:
+        chart.x_axis.title = x_title
+        chart.y_axis.title = y_title
+        chart.x_axis.tickLblPos = "low"
+        chart.y_axis.tickLblPos = "nextTo"
+        chart.x_axis.majorTickMark = "out"
+        chart.y_axis.majorTickMark = "out"
+        chart.x_axis.minorTickMark = "none"
+        chart.y_axis.minorTickMark = "none"
+        chart.x_axis.delete = False
+        chart.y_axis.delete = False
+
     for station in station_names:
         station_summary = summary[summary[station_column] == station].copy()
         station_summary = station_summary.sort_values(equipment_column)
@@ -1032,8 +1044,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
             )
             chart = LineChart()
             chart.title = f"{station} {item}"
-            chart.y_axis.title = item
-            chart.x_axis.title = "Equipment"
+            configure_chart_axes(chart, "Equipment", item)
             chart.add_data(data_ref, titles_from_data=True)
             chart.set_categories(categories)
             chart.height = 7
