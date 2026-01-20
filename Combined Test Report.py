@@ -286,6 +286,16 @@ def _build_station_name_order(series: pd.Series) -> list[str]:
     return station_names
 
 
+def _build_location_order(series: pd.Series) -> list[str]:
+    location_names: list[str] = []
+    for value in series.fillna(""):
+        name = str(value).strip()
+        if not name or name in location_names:
+            continue
+        location_names.append(name)
+    return location_names
+
+
 def resolve_equipment_warning(sheet_prefix: str) -> str:
     if sheet_prefix == "800G_TRX":
         return "⚠️ TRX 資料查不到 TESTNUMBER 欄位，Equipment 會留空"
@@ -512,6 +522,7 @@ def populate_equipment_performance_section(
     chart_start_row: int,
     section_title: str,
     group_with_location: bool = False,
+    split_by_location: bool = False,
     sort_columns: list[str] | None = None,
 ) -> tuple[int, int]:
     section_df = df[df["_category"].isin(categories)].copy()
@@ -574,72 +585,90 @@ def populate_equipment_performance_section(
     for station in station_names:
         station_summary = section_df[section_df[STATION_NAME_HEADER] == station].copy()
         if group_with_location:
-            station_summary["Equipment Display"] = station_summary.apply(
-                lambda row: " ".join(
-                    part
-                    for part in [str(row.get(equipment_column, "")).strip(), str(row.get("Location", "")).strip()]
-                    if part
-                ),
-                axis=1,
-            )
-            display_column = "Equipment Display"
-            header_label = "Equipment / Location"
+            station_summary["Location"] = station_summary["Location"].fillna("").astype(str).str.strip()
+
+        if group_with_location and split_by_location:
+            location_names = _build_location_order(station_summary["Location"])
+            if not location_names:
+                location_names = [""]
         else:
-            display_column = equipment_column
-            header_label = "Equipment"
+            location_names = [None]
 
-        sort_fields = [display_column, *sort_columns]
-        station_summary = station_summary.sort_values(sort_fields) if sort_fields else station_summary
-        if station_summary.empty:
-            station_summary = pd.DataFrame(
-                [{display_column: "", **{item: None for item in items}}]
-            )
+        for location in location_names:
+            if location is None:
+                location_summary = station_summary
+                title_prefix = station
+            else:
+                location_summary = station_summary[station_summary["Location"] == location].copy()
+                title_prefix = f"{station} {location}".strip() if location else station
 
-        data_columns = [display_column, *items]
-        station_summary = station_summary[data_columns]
+            if group_with_location and not split_by_location:
+                location_summary["Equipment Display"] = location_summary.apply(
+                    lambda row: " ".join(
+                        part
+                        for part in [str(row.get(equipment_column, "")).strip(), str(row.get("Location", "")).strip()]
+                        if part
+                    ),
+                    axis=1,
+                )
+                display_column = "Equipment Display"
+                header_label = "Equipment / Location"
+            else:
+                display_column = equipment_column
+                header_label = "Equipment"
 
-        title_row = data_block_start_row
-        header_row = data_block_start_row + 1
-        data_row_start = data_block_start_row + 2
+            sort_fields = [display_column, *sort_columns]
+            location_summary = location_summary.sort_values(sort_fields) if sort_fields else location_summary
+            if location_summary.empty:
+                location_summary = pd.DataFrame(
+                    [{display_column: "", **{item: None for item in items}}]
+                )
 
-        data_ws.cell(row=title_row, column=1, value=station)
-        data_ws.cell(row=header_row, column=1, value=header_label)
-        for idx, item in enumerate(items, start=2):
-            data_ws.cell(row=header_row, column=idx, value=item)
+            data_columns = [display_column, *items]
+            location_summary = location_summary[data_columns]
 
-        for row_offset, row in enumerate(station_summary.itertuples(index=False), start=0):
-            for col_offset, value in enumerate(row, start=1):
-                data_ws.cell(row=data_row_start + row_offset, column=col_offset, value=value)
+            title_row = data_block_start_row
+            header_row = data_block_start_row + 1
+            data_row_start = data_block_start_row + 2
 
-        data_row_end = data_row_start + len(station_summary) - 1
-        categories_ref = Reference(data_ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+            data_ws.cell(row=title_row, column=1, value=title_prefix)
+            data_ws.cell(row=header_row, column=1, value=header_label)
+            for idx, item in enumerate(items, start=2):
+                data_ws.cell(row=header_row, column=idx, value=item)
 
-        chart_col_index = 0
-        for item_index, item in enumerate(items):
-            if not station_summary[item].notna().any():
-                continue
-            if chart_col_index >= len(chart_columns):
-                break
-            data_ref = Reference(
-                data_ws,
-                min_col=item_index + 2,
-                min_row=header_row,
-                max_row=data_row_end,
-            )
-            chart = LineChart()
-            chart.title = f"{station} {item}"
-            configure_chart_axes(chart, header_label, item)
-            chart.add_data(data_ref, titles_from_data=True)
-            chart.set_categories(categories_ref)
-            chart.height = 7
-            chart.width = 14
-            anchor_col = get_column_letter(chart_columns[chart_col_index])
-            chart_ws.add_chart(chart, f"{anchor_col}{chart_block_start_row}")
-            chart_col_index += 1
+            for row_offset, row in enumerate(location_summary.itertuples(index=False), start=0):
+                for col_offset, value in enumerate(row, start=1):
+                    data_ws.cell(row=data_row_start + row_offset, column=col_offset, value=value)
 
-        table_height = len(station_summary) + 2
-        data_block_start_row += table_height + 3
-        chart_block_start_row += (chart_height_rows if chart_col_index else table_height) + 3
+            data_row_end = data_row_start + len(location_summary) - 1
+            categories_ref = Reference(data_ws, min_col=1, min_row=data_row_start, max_row=data_row_end)
+
+            chart_col_index = 0
+            for item_index, item in enumerate(items):
+                if not location_summary[item].notna().any():
+                    continue
+                if chart_col_index >= len(chart_columns):
+                    break
+                data_ref = Reference(
+                    data_ws,
+                    min_col=item_index + 2,
+                    min_row=header_row,
+                    max_row=data_row_end,
+                )
+                chart = LineChart()
+                chart.title = f"{title_prefix} {item}"
+                configure_chart_axes(chart, header_label, item)
+                chart.add_data(data_ref, titles_from_data=True)
+                chart.set_categories(categories_ref)
+                chart.height = 7
+                chart.width = 14
+                anchor_col = get_column_letter(chart_columns[chart_col_index])
+                chart_ws.add_chart(chart, f"{anchor_col}{chart_block_start_row}")
+                chart_col_index += 1
+
+            table_height = len(location_summary) + 2
+            data_block_start_row += table_height + 3
+            chart_block_start_row += (chart_height_rows if chart_col_index else table_height) + 3
 
     return data_block_start_row + 1, chart_block_start_row + 1
 
@@ -1093,6 +1122,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         chart_start_row=chart_next_row,
         section_title="800G_TRX LT/HT/RT",
         group_with_location=True,
+        split_by_location=True,
         sort_columns=sort_columns,
     )
 
