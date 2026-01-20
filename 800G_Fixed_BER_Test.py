@@ -95,6 +95,7 @@ THREE_T_BER_ITEM_SET = {item.lower() for item in THREE_T_BER_ITEMS}
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
+    parser.add_argument("--start-time", default="00:00", help="HH:MM (24小時制)")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--output-dir", help="輸出資料夾")
     return parser.parse_args()
@@ -105,6 +106,29 @@ def parse_date(value: str) -> datetime.date:
         return datetime.date.fromisoformat(value)
     except ValueError as exc:
         raise ValueError("日期格式需為 YYYY-MM-DD") from exc
+
+
+def parse_time(value: str) -> datetime.time:
+    if not value:
+        return datetime.time(0, 0)
+    try:
+        return datetime.datetime.strptime(value, "%H:%M").time()
+    except ValueError as exc:
+        raise ValueError("時間格式需為 HH:MM (24小時制)") from exc
+
+
+def build_datetime_range(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    start_time: datetime.time,
+) -> tuple[datetime.datetime, datetime.datetime]:
+    start_datetime = datetime.datetime.combine(start_date, start_time)
+    end_datetime = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
+    return start_datetime, end_datetime
+
+
+def format_datetime_for_sql(value: datetime.datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def conn_str_no_db() -> str:
@@ -162,7 +186,7 @@ WITH base AS (
 )
 SELECT TOP {limit} *
 FROM base
-WHERE test_date BETWEEN ? AND ?
+WHERE test_datetime BETWEEN ? AND ?
 ORDER BY test_datetime;
 """.strip()
 
@@ -175,7 +199,16 @@ def build_export_query(limit: int, base_dir: str) -> str:
     return f"""
 SELECT TOP {limit} *
 FROM ({sql_text}) AS base
-WHERE TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) BETWEEN ? AND ?
+WHERE
+    DATETIMEFROMPARTS(
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
+        0,
+        0
+    ) BETWEEN ? AND ?
 ORDER BY
     DATETIMEFROMPARTS(
         TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
@@ -194,8 +227,14 @@ def openquery_table(inner_sql: str) -> str:
     return f"OPENQUERY([{LINKED_SERVER}], '{escaped}')"
 
 
-def build_sorted_query_openquery(limit: int, start_date: str, end_date: str) -> str:
+def build_sorted_query_openquery(
+    limit: int,
+    start_datetime: datetime.datetime,
+    end_datetime: datetime.datetime,
+) -> str:
     top_clause = f"TOP {limit} " if limit else ""
+    start_value = format_datetime_for_sql(start_datetime)
+    end_value = format_datetime_for_sql(end_datetime)
     inner_query = f"""
 SELECT {top_clause}*,
     TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) AS test_date,
@@ -209,7 +248,16 @@ SELECT {top_clause}*,
         0
     ) AS test_datetime
 FROM {REMOTE_OBJECT}
-WHERE TRY_CONVERT(date, SUBSTRING(TESTNUMBER, 2, 8)) BETWEEN '{start_date}' AND '{end_date}'
+WHERE
+    DATETIMEFROMPARTS(
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 2, 4)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 6, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 8, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 10, 2)),
+        TRY_CONVERT(int, SUBSTRING(TESTNUMBER, 12, 2)),
+        0,
+        0
+    ) BETWEEN '{start_value}' AND '{end_value}'
 ORDER BY test_datetime
 """.strip()
     return f"SELECT * FROM {openquery_table(inner_query)}"
@@ -230,15 +278,18 @@ def apply_header(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def format_date_range(start_date: str, end_date: str) -> str:
+def format_date_range(start_date: str, end_date: str, start_time: datetime.time) -> str:
+    time_suffix = ""
+    if start_time != datetime.time(0, 0):
+        time_suffix = f"_{start_time:%H%M}"
     if start_date == end_date:
-        return start_date
-    return f"{start_date}_{end_date}"
+        return f"{start_date}{time_suffix}"
+    return f"{start_date}{time_suffix}_{end_date}"
 
 
-def build_output_path(base_dir: str, start_date: str, end_date: str) -> str:
+def build_output_path(base_dir: str, start_date: str, end_date: str, start_time: datetime.time) -> str:
     base_name = os.path.splitext(os.path.basename(__file__))[0]
-    date_range = format_date_range(start_date, end_date)
+    date_range = format_date_range(start_date, end_date, start_time)
     filename = f"{base_name}_{date_range}{OUTPUT_EXTENSION}"
     return os.path.join(base_dir, filename)
 
@@ -939,14 +990,22 @@ def populate_data_analysis_sheet(
 
 def main():
     args = parse_args()
-    start_date = parse_date(args.start_date).isoformat()
-    end_date = parse_date(args.end_date).isoformat()
+    start_date_value = parse_date(args.start_date)
+    end_date_value = parse_date(args.end_date)
+    start_time = parse_time(args.start_time)
+    start_datetime, end_datetime = build_datetime_range(
+        start_date_value,
+        end_date_value,
+        start_time,
+    )
+    start_date = start_date_value.isoformat()
+    end_date = end_date_value.isoformat()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = normalize_output_dir(base_dir, args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
-    out_path = build_output_path(output_dir, args.start_date, args.end_date)
+    out_path = build_output_path(output_dir, args.start_date, args.end_date, start_time)
     out_path = ensure_unique_output_path(out_path)
 
     try:
@@ -969,7 +1028,7 @@ def main():
 
             # 2) 匯出資料（先小量）
             if use_openquery:
-                export_sql = build_sorted_query_openquery(EXPORT_N, start_date, end_date)
+                export_sql = build_sorted_query_openquery(EXPORT_N, start_datetime, end_datetime)
             else:
                 export_sql = build_export_query(EXPORT_N, base_dir)
             print(f"\n📤 匯出 TOP {EXPORT_N} 到 Excel：{out_path}")
@@ -980,7 +1039,7 @@ def main():
                 df = pd.read_sql_query(
                     export_sql,
                     conn,
-                    params=[start_date, end_date],
+                    params=[start_datetime, end_datetime],
                 )
             df = apply_header(df)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
