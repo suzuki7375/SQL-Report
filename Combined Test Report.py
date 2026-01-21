@@ -523,6 +523,7 @@ def populate_equipment_performance_section(
     section_title: str,
     group_with_location: bool = False,
     split_by_location: bool = False,
+    component_column: str | None = None,
     sort_columns: list[str] | None = None,
 ) -> tuple[int, int]:
     section_df = df[df["_category"].isin(categories)].copy()
@@ -537,6 +538,9 @@ def populate_equipment_performance_section(
 
     if group_with_location and "Location" not in section_df.columns:
         section_df["Location"] = ""
+
+    if component_column not in section_df.columns:
+        component_column = None
 
     section_df[STATION_NAME_HEADER] = build_station_name_series(
         section_df,
@@ -616,6 +620,10 @@ def populate_equipment_performance_section(
             else:
                 display_column = equipment_column
                 header_label = "Equipment"
+
+            if component_column:
+                display_column = component_column
+                header_label = "COMPONENTID"
 
             sort_fields = [display_column, *sort_columns]
             location_summary = location_summary.sort_values(sort_fields) if sort_fields else location_summary
@@ -1075,6 +1083,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
     df = _add_equipment_column(df, module, equipment_map)
     location_column = find_location_column(list(df.columns))
     df = _add_location_column(df, location_column)
+    component_column = module.find_component_column(list(df.columns))
     sort_columns: list[str] = []
     if hasattr(module, "determine_sort_columns"):
         sort_columns = module.determine_sort_columns(df)
@@ -1098,6 +1107,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         chart_start_row=chart_next_row,
         section_title="800G_TRX DDMI",
         group_with_location=False,
+        component_column=component_column,
         sort_columns=sort_columns,
     )
     data_next_row, chart_next_row = populate_equipment_performance_section(
@@ -1110,6 +1120,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         chart_start_row=chart_next_row,
         section_title="800G_TRX ATS",
         group_with_location=False,
+        component_column=component_column,
         sort_columns=sort_columns,
     )
     populate_equipment_performance_section(
@@ -1123,6 +1134,7 @@ def populate_equipment_performance_sheet(workbook: Workbook, report_results: dic
         section_title="800G_TRX LT/HT/RT",
         group_with_location=True,
         split_by_location=True,
+        component_column=component_column,
         sort_columns=sort_columns,
     )
 
