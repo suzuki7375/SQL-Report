@@ -471,6 +471,15 @@ def build_ui() -> tk.Tk:
                 server.login(DEFAULT_LOGIN_ACCOUNT, DEFAULT_LOGIN_PASSWORD)
                 server.send_message(message)
             return True
+        except smtplib.SMTPAuthenticationError as exc:
+            error_text = str(exc)
+            if "SmtpClientAuthentication is disabled" in error_text or "5.7.139" in error_text:
+                status_var.set(
+                    "Outlook 寄信失敗：此租戶已停用 SMTP AUTH，請啟用後再試（https://aka.ms/smtp_auth_disabled）。"
+                )
+            else:
+                status_var.set(f"Outlook 寄信失敗: {exc}")
+            return False
         except Exception as exc:
             status_var.set(f"Outlook 寄信失敗: {exc}")
             return False
