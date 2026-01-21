@@ -89,6 +89,9 @@ class DatePicker(ttk.Frame):
     def value(self) -> str:
         return self._value.get()
 
+    def set_value(self, value: datetime.date) -> None:
+        self._value.set(value.isoformat())
+
     def _open_picker(self, _event: tk.Event) -> None:
         if self._picker_window and self._picker_window.winfo_exists():
             self._picker_window.lift()
@@ -400,6 +403,11 @@ def build_ui() -> tk.Tk:
         output_path = build_combined_default_output_path(output_dir)
         return ensure_unique_output_path(output_path)
 
+    def sync_date_pickers_to_today() -> None:
+        today_date = datetime.date.today()
+        start_picker.set_value(today_date)
+        end_picker.set_value(today_date)
+
     def resolve_output_dir() -> str | None:
         output_dir = output_dir_var.get().strip() or default_output_dir()
         output_dir = os.path.expanduser(output_dir)
@@ -552,6 +560,7 @@ def build_ui() -> tk.Tk:
             nonlocal scheduled_job_id, scheduled_output_path, pending_mail, pending_mail_path
             scheduled_job_id = None
             if daily_schedule_var.get() and scheduled_output_dir:
+                sync_date_pickers_to_today()
                 scheduled_output_path = build_unique_combined_output_path(scheduled_output_dir)
             if not scheduled_output_path:
                 status_var.set("找不到排程輸出路徑")
