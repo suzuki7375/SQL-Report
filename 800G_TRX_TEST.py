@@ -313,6 +313,48 @@ def find_testnumber_column(columns: list[str]) -> str | None:
     )
 
 
+def build_date_series(df: pd.DataFrame) -> pd.Series | None:
+    date_columns = [
+        "test_date",
+        "test_datetime",
+        "TEST_DATETIME",
+        "TestDateTime",
+        "TEST_TIME",
+        "TESTDATE",
+    ]
+    for column in date_columns:
+        if column in df.columns:
+            series = pd.to_datetime(df[column], errors="coerce")
+            if series.notna().any():
+                return series.dt.date
+
+    testnumber_column = find_testnumber_column(list(df.columns))
+    if not testnumber_column:
+        return None
+    series = pd.to_datetime(
+        df[testnumber_column].astype(str).str.slice(1, 9),
+        format="%Y%m%d",
+        errors="coerce",
+    )
+    if series.notna().any():
+        return series.dt.date
+    return None
+
+
+def filter_df_by_date_range(
+    df: pd.DataFrame,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    date_series = build_date_series(df)
+    if date_series is None:
+        return df
+    mask = (date_series >= start_date) & (date_series <= end_date)
+    return df.loc[mask].copy()
+
+
 def find_equipment_column(columns: list[str]) -> str | None:
     return find_column(
         columns,
@@ -1059,8 +1101,10 @@ def populate_equipment_performance_sheet(workbook: Workbook, ddmi_df: pd.DataFra
 
 def main():
     args = parse_args()
-    start_date = parse_date(args.start_date).isoformat()
-    end_date = parse_date(args.end_date).isoformat()
+    start_date_obj = parse_date(args.start_date)
+    end_date_obj = parse_date(args.end_date)
+    start_date = start_date_obj.isoformat()
+    end_date = end_date_obj.isoformat()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1104,6 +1148,7 @@ def main():
                     params=[start_date, end_date],
                 )
             df = apply_header(df)
+            df = filter_df_by_date_range(df, start_date_obj, end_date_obj)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
             if PREVIEW_N > 0:
                 print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")

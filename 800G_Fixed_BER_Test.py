@@ -1027,6 +1027,7 @@ def main():
                     params=[start_date, end_date],
                 )
             df = apply_header(df)
+            df = filter_df_by_date_range(df, start_date_obj, end_date_obj)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
             if PREVIEW_N > 0:
                 print(f"\n👀 預覽資料 TOP {PREVIEW_N}：")
@@ -1059,7 +1060,7 @@ def main():
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
-            analysis_df = filter_df_by_date_range(df, start_date_obj, end_date_obj)
+            analysis_df = df
             metrics = build_data_analysis_metrics(analysis_df)
             failed_devices = build_failed_devices(analysis_df)
             failed_devices = add_equipment_column(failed_devices, equipment_map)
