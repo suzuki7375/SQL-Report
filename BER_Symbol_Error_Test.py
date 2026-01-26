@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import datetime
 import os
 import sys
 import time
@@ -91,6 +92,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--output-dir", help="輸出資料夾")
     return parser.parse_args()
+
+
+def parse_date(value: str) -> datetime.date:
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("日期格式需為 YYYY-MM-DD") from exc
 
 
 def conn_str_no_db() -> str:
@@ -277,6 +285,48 @@ def find_testnumber_column(columns: list[str]) -> str | None:
             "test_no",
         ],
     )
+
+
+def build_date_series(df: pd.DataFrame) -> pd.Series | None:
+    date_columns = [
+        "test_date",
+        "test_datetime",
+        "TEST_DATETIME",
+        "TestDateTime",
+        "TEST_TIME",
+        "TESTDATE",
+    ]
+    for column in date_columns:
+        if column in df.columns:
+            series = pd.to_datetime(df[column], errors="coerce")
+            if series.notna().any():
+                return series.dt.date
+
+    testnumber_column = find_testnumber_column(list(df.columns))
+    if not testnumber_column:
+        return None
+    series = pd.to_datetime(
+        df[testnumber_column].astype(str).str.slice(1, 9),
+        format="%Y%m%d",
+        errors="coerce",
+    )
+    if series.notna().any():
+        return series.dt.date
+    return None
+
+
+def filter_df_by_date_range(
+    df: pd.DataFrame,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    date_series = build_date_series(df)
+    if date_series is None:
+        return df
+    mask = (date_series >= start_date) & (date_series <= end_date)
+    return df.loc[mask].copy()
 
 
 def find_equipment_column(columns: list[str]) -> str | None:
@@ -884,6 +934,10 @@ def populate_data_analysis_sheet(
 
 def main():
     args = parse_args()
+    start_date_obj = parse_date(args.start_date)
+    end_date_obj = parse_date(args.end_date)
+    start_date = start_date_obj.isoformat()
+    end_date = end_date_obj.isoformat()
     test_login()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -909,7 +963,7 @@ def main():
             df = pd.read_sql_query(
                 export_sql,
                 conn,
-                params=[args.start_date, args.end_date],
+                params=[start_date, end_date],
             )
             df = apply_header(df)
             print(f"✅ export rows={len(df)} time={time.time()-t0:.1f}s")
@@ -944,10 +998,11 @@ def main():
             df["_category"] = df[CH_NUMBER_HEADER].apply(classify_ch_number)
             workbook = load_output_workbook(base_dir)
             df = apply_error_codes(df)
-            metrics = build_data_analysis_metrics(df)
-            failed_devices = build_failed_devices(df)
+            analysis_df = filter_df_by_date_range(df, start_date_obj, end_date_obj)
+            metrics = build_data_analysis_metrics(analysis_df)
+            failed_devices = build_failed_devices(analysis_df)
             failed_devices = add_equipment_column(failed_devices, equipment_map)
-            failed_components = build_failed_component_records(df)
+            failed_components = build_failed_component_records(analysis_df)
             for category in categories:
                 sheet_df = df[df["_category"] == category].drop(columns=["_category"])
                 if sheet_df.empty:
