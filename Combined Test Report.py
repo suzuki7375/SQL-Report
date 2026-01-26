@@ -195,7 +195,14 @@ def export_report_dataframe(module, start_date: str, end_date: str) -> pd.DataFr
             export_sql = module.build_sorted_query(module.EXPORT_N)
             df = pd.read_sql_query(export_sql, conn, params=[start_date, end_date])
 
-    return module.apply_header(df)
+    df = module.apply_header(df)
+    if hasattr(module, "filter_df_by_date_range"):
+        df = module.filter_df_by_date_range(
+            df,
+            parse_date(start_date),
+            parse_date(end_date),
+        )
+    return df
 
 
 def find_location_column(columns: list[str]) -> str | None:
