@@ -7,6 +7,7 @@ import sys
 import time
 
 import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
 import pyodbc
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -337,6 +338,22 @@ def build_date_series(df: pd.DataFrame) -> pd.Series | None:
             series = pd.to_datetime(df[column], errors="coerce")
             if series.notna().any():
                 return series.dt.date
+
+    for column in df.columns:
+        if is_datetime64_any_dtype(df[column]):
+            series = pd.to_datetime(df[column], errors="coerce")
+            if series.notna().any():
+                return series.dt.date
+
+    candidate_columns = [
+        column
+        for column in df.columns
+        if "date" in column.lower() or "time" in column.lower()
+    ]
+    for column in candidate_columns:
+        series = pd.to_datetime(df[column], errors="coerce")
+        if series.notna().any():
+            return series.dt.date
 
     testnumber_column = find_testnumber_column(list(df.columns))
     if not testnumber_column:
